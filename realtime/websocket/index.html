@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Polymarket Real-Time Data</title>
+</head>
+<body>
+  <h2>Polymarket Live Feed</h2>
+  <div id="output">Connecting...</div>
+
+  <script>
+    const output = document.getElementById('output');
+    const socket = new WebSocket('wss://ws-subscriptions-clob.polymarket.com/ws/');
+
+    socket.onopen = () => {
+      output.innerHTML = 'Connected! Waiting for data...';
+    };
+
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      output.innerHTML = 'Latest update: ' + JSON.stringify(message);
+    };
+
+    socket.onclose = () => {
+      output.innerHTML = 'Connection closed';
+    };
+  </script>
+</body>
+</html>
