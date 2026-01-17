@@ -9,20 +9,54 @@
 
   <script>
     const output = document.getElementById('output');
-    const socket = new WebSocket('wss://ws-subscriptions-clob.polymarket.com/ws/');
 
-    socket.onopen = () => {
-      output.innerHTML = 'Connected! Waiting for data...';
-    };
+    // Step 1: Fetch market IDs from Polymarket Gamma API
+    async function fetchMarketId() {
+      try {
+        const response = await fetch('https://gamma.polymarket.com/markets?category=Crypto&limit=1');
+        const data = await response.json();
+        if (data.markets && data.markets.length > 0) {
+          return data.markets[0].id; // Get the first market ID
+        }
+      } catch (error) {
+        output.innerHTML = 'Error fetching market ID';
+      }
+      return null;
+    }
 
-    socket.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      output.innerHTML = 'Latest update: ' + JSON.stringify(message);
-    };
+    // Step 2: Open WebSocket and subscribe
+    async function startWebSocket() {
+      const marketId = await fetchMarketId();
+      if (!marketId) {
+        return;
+      }
 
-    socket.onclose = () => {
-      output.innerHTML = 'Connection closed';
-    };
+      const socket = new WebSocket('wss://ws-subscriptions-clob.polymarket.com/ws/');
+
+      socket.onopen = () => {
+        output.innerHTML = 'Connected! Subscribing to market: ' + marketId;
+
+        // Subscribe to the fetched market ID
+        const subscriptionMessage = {
+          type: 'subscribe',
+          channel: 'market',
+          marketId: marketId
+        };
+        socket.send(JSON.stringify(subscriptionMessage));
+      };
+
+      socket.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        output.innerHTML = 'Latest update: ' + JSON.stringify(message);
+      };
+
+      socket.onclose = () => {
+        output.innerHTML = 'Connection closed';
+      };
+    }
+
+    // Start everything
+    startWebSocket();
   </script>
 </body>
 </html>
