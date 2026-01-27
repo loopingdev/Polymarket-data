@@ -4,329 +4,248 @@
 <meta charset="UTF-8">
 <title>Compound Trade Task Tracker</title>
 <style>
-  :root {
-    --bg: #f5f5f5;
-    --text: #111;
-    --card: #ffffff;
-    --accent: #4caf50;
-  }
-  body.dark {
-    --bg: #121212;
-    --text: #f5f5f5;
-    --card: #1e1e1e;
-    --accent: #81c784;
-  }
-  body {
-    margin: 0;
-    font-family: Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-  }
-  header {
-    position: sticky;
-    top: 0;
-    background: var(--card);
-    padding: 10px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    z-index: 10;
-  }
-  h1 {
-    margin: 0 0 10px 0;
-  }
-  .inputs, .buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 10px;
-  }
-  input, select, button {
-    padding: 6px;
-    font-size: 14px;
-  }
-  button {
-    cursor: pointer;
-  }
-  .summary {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px,1fr));
-    gap: 10px;
-    margin-bottom: 10px;
-  }
-  .card {
-    background: var(--card);
-    padding: 10px;
-    border-radius: 6px;
-  }
-  .progress-container {
-    width: 100%;
-    background: #ccc;
-    border-radius: 5px;
-    overflow: hidden;
-  }
-  .progress-bar {
-    height: 10px;
-    background: var(--accent);
-    width: 0%;
-  }
-  #taskContainer {
-    max-height: 70vh;
-    overflow-y: auto;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  th, td {
-    padding: 6px;
-    border-bottom: 1px solid #ccc;
-    text-align: center;
-  }
-  tr.current {
-    background: rgba(76,175,80,0.2);
-  }
+:root{
+  --bg:#f4f6fb; --card:#fff; --text:#111; --accent:#4caf50; --muted:#777;
+}
+body.dark{
+  --bg:#121212; --card:#1e1e1e; --text:#f5f5f5; --accent:#81c784; --muted:#aaa;
+}
+body{
+  margin:0;font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--text);
+}
+header{
+  position:sticky;top:0;z-index:10;background:var(--card);
+  box-shadow:0 2px 8px rgba(0,0,0,.1);padding:12px;
+}
+h1{margin:0 0 8px 0;}
+button,input,select{padding:8px;border-radius:6px;border:1px solid #ccc;font-size:14px;}
+button{cursor:pointer;background:var(--accent);color:#fff;border:none;}
+button.secondary{background:#555;}
+button.outline{background:none;color:var(--text);border:1px solid #ccc;}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+.panel{background:var(--card);border-radius:10px;padding:10px;margin-bottom:10px;}
+.hidden{display:none;}
+
+.summary{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;
+}
+.card{background:var(--card);padding:8px;border-radius:8px;}
+.progress{width:100%;height:10px;background:#ccc;border-radius:5px;overflow:hidden;}
+.progress-bar{height:10px;background:var(--accent);width:0;}
+
+#taskContainer{max-height:70vh;overflow:auto;}
+table{width:100%;border-collapse:collapse;}
+th,td{padding:6px;border-bottom:1px solid #ccc;text-align:center;font-size:13px;}
+tr.current{background:rgba(76,175,80,.2);}
+
+.toggle-btn{
+  background:#2196f3;
+}
 </style>
 </head>
 <body>
 <header>
-  <h1>Compound Trade Task Tracker</h1>
+<h1>Compound Trade Task Tracker</h1>
 
-  <div class="inputs">
-    <input id="capital" type="number" placeholder="Initial Capital" value="300">
-    <input id="profit" type="number" placeholder="Profit per Trade (%)" value="3">
-    <input id="target" type="number" placeholder="Target Balance" value="20000">
-    <input id="tph" type="number" placeholder="Trades per Hour" value="4">
-    <input id="hpd" type="number" placeholder="Hours per Day" value="4">
-    <select id="mode">
-      <option value="total">Generate by Total Trades</option>
-      <option value="target">Generate until Target Balance</option>
-    </select>
-    <input id="totalTrades" type="number" placeholder="Total Trades (if mode=total)" value="100">
-  </div>
+<button class="toggle-btn" onclick="toggleSettings()">⚙ Settings</button>
 
-  <div class="buttons">
-    <button onclick="generatePlan()">Generate Plan</button>
-    <button onclick="saveState()">Save Progress</button>
-    <button onclick="resetPlan()">Reset Plan</button>
-    <button onclick="exportCSV()">Export CSV</button>
-    <button onclick="exportJSON()">Export JSON</button>
-    <input type="file" id="importFile" onchange="importJSON(event)">
-    <button onclick="jumpToCurrent()">Jump to Current Trade</button>
-    <button onclick="markNext()">Mark Next Trade Done</button>
-    <button onclick="undoLast()">Undo Last Trade</button>
-    <button onclick="toggleDark()">Dark Mode</button>
-  </div>
+<div id="settingsPanel" class="panel">
+<div class="controls">
+<input id="capital" type="number" value="300" placeholder="Initial Capital">
+<input id="profit" type="number" value="3" placeholder="Profit %">
+<input id="target" type="number" value="20000" placeholder="Target Balance">
+<input id="tph" type="number" value="4" placeholder="Trades/Hour">
+<input id="hpd" type="number" value="4" placeholder="Hours/Day">
+<select id="mode">
+<option value="total">Generate by Total Trades</option>
+<option value="target">Generate until Target Balance</option>
+</select>
+<input id="totalTrades" type="number" value="100" placeholder="Total Trades">
+</div>
 
-  <div class="summary">
-    <div class="card">Current Trade: <span id="currentTrade">0</span></div>
-    <div class="card">Completed / Total: <span id="completed">0</span></div>
-    <div class="card">Current Balance: $<span id="currentBalance">0</span></div>
-    <div class="card">Next Balance: $<span id="nextBalance">0</span></div>
-    <div class="card">Remaining to Target: $<span id="remaining">0</span></div>
-    <div class="card">Est. Time Remaining: <span id="timeRemaining">0</span></div>
-  </div>
-  <div class="progress-container">
-    <div class="progress-bar" id="progressBar"></div>
-  </div>
+<div class="controls">
+<button onclick="generatePlan()">Generate Plan</button>
+<button class="secondary" onclick="resetPlan()">Reset</button>
+<button class="outline" onclick="toggleDark()">Dark Mode</button>
+</div>
+</div>
+
+<div class="panel">
+<div class="controls">
+<button onclick="saveState()">Save</button>
+<button onclick="exportCSV()">Export CSV</button>
+<button onclick="exportJSON()">Export JSON</button>
+<input type="file" onchange="importJSON(event)">
+<button onclick="jumpToCurrent()">Jump to Current</button>
+<button onclick="markNext()">Next Done</button>
+<button onclick="undoLast()">Undo</button>
+</div>
+
+<div class="summary">
+<div class="card">Current Trade: <b id="currentTrade">0</b></div>
+<div class="card">Completed: <b id="completed">0</b></div>
+<div class="card">Current Balance: $<b id="currentBalance">0</b></div>
+<div class="card">Next Balance: $<b id="nextBalance">0</b></div>
+<div class="card">Remaining: $<b id="remaining">0</b></div>
+<div class="card">Time Left: <b id="timeRemaining">0</b></div>
+</div>
+<div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+</div>
 </header>
 
 <div id="taskContainer">
-  <table>
-    <thead>
-      <tr>
-        <th>Done</th>
-        <th>Trade #</th>
-        <th>Balance After</th>
-        <th>Profit</th>
-        <th>Timestamp</th>
-      </tr>
-    </thead>
-    <tbody id="taskTable"></tbody>
-  </table>
+<table>
+<thead>
+<tr>
+<th>Done</th><th>Trade</th><th>Balance</th><th>Profit</th><th>Time</th>
+</tr>
+</thead>
+<tbody id="taskTable"></tbody>
+</table>
 </div>
 
 <script>
-let state = {
-  inputs: {},
-  trades: []
-};
+let state={inputs:{},trades:[]};
 
-function generatePlan() {
-  const capital = parseFloat(capitalInput.value);
-  const profit = parseFloat(profitInput.value);
-  const target = parseFloat(targetInput.value);
-  const tph = parseInt(tphInput.value);
-  const hpd = parseInt(hpdInput.value);
-  const mode = modeSelect.value;
-  const totalTrades = parseInt(totalTradesInput.value);
-
-  let trades = [];
-  let balance = capital;
-  let tradeCount = 0;
-
-  while (true) {
-    tradeCount++;
-    let newBalance = balance * (1 + profit / 100);
-    trades.push({
-      trade: tradeCount,
-      balance: newBalance.toFixed(2),
-      profit: (newBalance - balance).toFixed(2),
-      done: false,
-      timestamp: ""
-    });
-    balance = newBalance;
-
-    if (mode === "total" && tradeCount >= totalTrades) break;
-    if (mode === "target" && balance >= target) break;
-    if (tradeCount >= 500) break;
-  }
-
-  state = {
-    inputs: {capital, profit, target, tph, hpd, mode, totalTrades},
-    trades
-  };
-
-  saveState();
-  render();
+function toggleSettings(){
+document.getElementById("settingsPanel").classList.toggle("hidden");
 }
 
-function render() {
-  const tbody = document.getElementById("taskTable");
-  tbody.innerHTML = "";
-  const fragment = document.createDocumentFragment();
+function generatePlan(){
+const capital=+capitalInput.value;
+const profit=+profitInput.value;
+const target=+targetInput.value;
+const tph=+tphInput.value;
+const hpd=+hpdInput.value;
+const mode=modeSelect.value;
+const totalTrades=+totalTradesInput.value;
 
-  state.trades.forEach((t, i) => {
-    const tr = document.createElement("tr");
-    if (!t.done && getCurrentTradeIndex() === i) tr.classList.add("current");
+let trades=[],balance=capital,count=0;
 
-    tr.innerHTML = `
-      <td><input type="checkbox" ${t.done ? "checked":""} onchange="toggleDone(${i}, this.checked)"></td>
-      <td>${t.trade}</td>
-      <td>$${t.balance}</td>
-      <td>$${t.profit}</td>
-      <td>${t.timestamp || ""}</td>
-    `;
-    fragment.appendChild(tr);
-  });
-
-  tbody.appendChild(fragment);
-  updateSummary();
+while(true){
+count++;
+let newBal=balance*(1+profit/100);
+trades.push({
+trade:count,
+balance:newBal.toFixed(2),
+profit:(newBal-balance).toFixed(2),
+done:false,
+timestamp:""
+});
+balance=newBal;
+if(mode==="total" && count>=totalTrades)break;
+if(mode==="target" && balance>=target)break;
+if(count>=500)break;
 }
 
-function toggleDone(index, checked) {
-  state.trades[index].done = checked;
-  state.trades[index].timestamp = checked ? new Date().toLocaleString() : "";
-  saveState();
-  render();
+state={inputs:{capital,profit,target,tph,hpd,mode,totalTrades},trades};
+saveState();
+render();
+document.getElementById("settingsPanel").classList.add("hidden");
 }
 
-function updateSummary() {
-  const completed = state.trades.filter(t => t.done).length;
-  const total = state.trades.length;
-  const currentTrade = completed + 1;
-  const lastBalance = completed === 0 ? state.inputs.capital : state.trades[completed-1].balance;
-  const nextBalance = state.trades[completed] ? state.trades[completed].balance : lastBalance;
-  const remaining = Math.max(0, state.inputs.target - lastBalance);
-  const tradesLeft = total - completed;
-  const hoursLeft = tradesLeft / state.inputs.tph;
-  const daysLeft = hoursLeft / state.inputs.hpd;
-
-  document.getElementById("currentTrade").innerText = currentTrade;
-  document.getElementById("completed").innerText = `${completed} / ${total}`;
-  document.getElementById("currentBalance").innerText = Number(lastBalance).toFixed(2);
-  document.getElementById("nextBalance").innerText = Number(nextBalance).toFixed(2);
-  document.getElementById("remaining").innerText = remaining.toFixed(2);
-  document.getElementById("timeRemaining").innerText = `${daysLeft.toFixed(2)} days`;
-
-  const percent = (completed / total) * 100;
-  document.getElementById("progressBar").style.width = percent + "%";
+function render(){
+const tbody=document.getElementById("taskTable");
+tbody.innerHTML="";
+const frag=document.createDocumentFragment();
+state.trades.forEach((t,i)=>{
+const tr=document.createElement("tr");
+if(!t.done && getCurrentIndex()===i)tr.classList.add("current");
+tr.innerHTML=`
+<td><input type="checkbox" ${t.done?"checked":""} onchange="toggleDone(${i},this.checked)"></td>
+<td>${t.trade}</td>
+<td>$${t.balance}</td>
+<td>$${t.profit}</td>
+<td>${t.timestamp}</td>`;
+frag.appendChild(tr);
+});
+tbody.appendChild(frag);
+updateSummary();
 }
 
-function getCurrentTradeIndex() {
-  return state.trades.findIndex(t => !t.done);
+function toggleDone(i,val){
+state.trades[i].done=val;
+state.trades[i].timestamp=val?new Date().toLocaleString():"";
+saveState();
+render();
 }
 
-function jumpToCurrent() {
-  const index = getCurrentTradeIndex();
-  const rows = document.querySelectorAll("#taskTable tr");
-  if (rows[index]) rows[index].scrollIntoView({behavior:"smooth"});
+function updateSummary(){
+const done=state.trades.filter(t=>t.done).length;
+const total=state.trades.length;
+const current=done+1;
+const lastBal=done===0?state.inputs.capital:state.trades[done-1].balance;
+const nextBal=state.trades[done]?state.trades[done].balance:lastBal;
+const remain=Math.max(0,state.inputs.target-lastBal);
+const tradesLeft=total-done;
+const hoursLeft=tradesLeft/state.inputs.tph;
+const daysLeft=hoursLeft/state.inputs.hpd;
+
+currentTrade.innerText=current;
+completed.innerText=`${done}/${total}`;
+currentBalance.innerText=Number(lastBal).toFixed(2);
+nextBalance.innerText=Number(nextBal).toFixed(2);
+remaining.innerText=remain.toFixed(2);
+timeRemaining.innerText=daysLeft.toFixed(2)+" days";
+
+progressBar.style.width=(done/total*100)+"%";
 }
 
-function markNext() {
-  const index = getCurrentTradeIndex();
-  if (index >= 0) toggleDone(index, true);
+function getCurrentIndex(){return state.trades.findIndex(t=>!t.done);}
+function jumpToCurrent(){
+const i=getCurrentIndex();
+const rows=document.querySelectorAll("#taskTable tr");
+if(rows[i])rows[i].scrollIntoView({behavior:"smooth"});
 }
-
-function undoLast() {
-  const doneTrades = state.trades.map((t,i)=>({t,i})).filter(x=>x.t.done);
-  if (doneTrades.length === 0) return;
-  const last = doneTrades[doneTrades.length-1].i;
-  toggleDone(last, false);
+function markNext(){
+const i=getCurrentIndex();
+if(i>=0)toggleDone(i,true);
 }
-
-function saveState() {
-  localStorage.setItem("tradeTrackerState", JSON.stringify(state));
+function undoLast(){
+const doneList=state.trades.map((t,i)=>({t,i})).filter(x=>x.t.done);
+if(!doneList.length)return;
+toggleDone(doneList.pop().i,false);
 }
-
-function loadState() {
-  const saved = localStorage.getItem("tradeTrackerState");
-  if (saved) {
-    state = JSON.parse(saved);
-    render();
-  }
+function saveState(){localStorage.setItem("tradeTracker",JSON.stringify(state));}
+function loadState(){
+const s=localStorage.getItem("tradeTracker");
+if(s){state=JSON.parse(s);render();}
 }
-
-function resetPlan() {
-  if (!confirm("Clear all progress?")) return;
-  localStorage.removeItem("tradeTrackerState");
-  state = {inputs:{}, trades:[]};
-  render();
+function resetPlan(){
+if(!confirm("Reset all?"))return;
+localStorage.removeItem("tradeTracker");
+state={inputs:{},trades:[]};
+render();
+document.getElementById("settingsPanel").classList.remove("hidden");
 }
-
-function exportCSV() {
-  let csv = "tradeNumber,done,balanceAfter,profitAmount,timestamp\n";
-  state.trades.forEach(t=>{
-    csv += `${t.trade},${t.done},${t.balance},${t.profit},${t.timestamp}\n`;
-  });
-  downloadFile(csv, "trades.csv", "text/csv");
+function exportCSV(){
+let csv="trade,done,balance,profit,timestamp\n";
+state.trades.forEach(t=>csv+=`${t.trade},${t.done},${t.balance},${t.profit},${t.timestamp}\n`);
+download(csv,"trades.csv","text/csv");
 }
-
-function exportJSON() {
-  downloadFile(JSON.stringify(state, null, 2), "trades.json", "application/json");
+function exportJSON(){download(JSON.stringify(state,null,2),"trades.json","application/json");}
+function importJSON(e){
+const f=e.target.files[0];if(!f)return;
+const r=new FileReader();
+r.onload=()=>{state=JSON.parse(r.result);saveState();render();}
+r.readAsText(f);
 }
-
-function importJSON(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    state = JSON.parse(reader.result);
-    saveState();
-    render();
-  };
-  reader.readAsText(file);
+function download(content,name,type){
+const blob=new Blob([content],{type});
+const url=URL.createObjectURL(blob);
+const a=document.createElement("a");
+a.href=url;a.download=name;a.click();
+URL.revokeObjectURL(url);
 }
+function toggleDark(){document.body.classList.toggle("dark");}
 
-function downloadFile(content, filename, type) {
-  const blob = new Blob([content], {type});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function toggleDark() {
-  document.body.classList.toggle("dark");
-}
-
-const capitalInput = document.getElementById("capital");
-const profitInput = document.getElementById("profit");
-const targetInput = document.getElementById("target");
-const tphInput = document.getElementById("tph");
-const hpdInput = document.getElementById("hpd");
-const modeSelect = document.getElementById("mode");
-const totalTradesInput = document.getElementById("totalTrades");
+const capitalInput=document.getElementById("capital");
+const profitInput=document.getElementById("profit");
+const targetInput=document.getElementById("target");
+const tphInput=document.getElementById("tph");
+const hpdInput=document.getElementById("hpd");
+const modeSelect=document.getElementById("mode");
+const totalTradesInput=document.getElementById("totalTrades");
 
 loadState();
 </script>
