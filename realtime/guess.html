@@ -495,7 +495,6 @@
             
             parseETString(etString) {
                 const parts = etString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-                const targetET = `${parts[2]}/${parts[3]}/${parts[1]}, ${parts[4]}:${parts[5]}:${parts[6]}`;
                 
                 for (let offset = -12; offset <= 12; offset++) {
                     const testDate = new Date(`${parts[1]}-${parts[2]}-${parts[3]}T${parts[4]}:${parts[5]}:${parts[6]}`);
@@ -1201,6 +1200,7 @@
                     
                     if (!referencePrice) {
                         document.getElementById('predictionDirection').textContent = 'NO DATA';
+                        document.getElementById('predictionProbability').textContent = '---%';
                         return;
                     }
                     
@@ -1209,24 +1209,45 @@
                     const endTime = now.getTime();
                     
                     const candles = await this.aggregator.fetchCandles(startTime, endTime);
-                    this.priceHistory = candles;
                     
-                    if (now >= window.start && !this.windowManager.entryPrice) {
-                        const entryCandle = candles.find(c => c.timestamp >= window.start.getTime()) || candles[candles.length - 1];
-                        this.windowManager.setEntryPrice(entryCandle.close);
+                    // Check if we have any candles
+                    if (!candles || candles.length === 0) {
+                        console.warn('No candles available');
+                        document.getElementById('predictionWarning').innerHTML = 
+                            '<div class="warning">⚠️ No historical data available yet. Waiting for candles...</div>';
+                        return;
                     }
                     
+                    this.priceHistory = candles;
+                    
+                    // Set entry price if we're at/after window start and don't have one yet
+                    if (now >= window.start && !this.windowManager.entryPrice) {
+                        const entryCandle = candles.find(c => c.timestamp >= window.start.getTime());
+                        if (entryCandle) {
+                            this.windowManager.setEntryPrice(entryCandle.close);
+                        } else if (candles.length > 0) {
+                            // Use last available candle as proxy
+                            this.windowManager.setEntryPrice(candles[candles.length - 1].close);
+                            console.log('Using proxy entry price from last candle');
+                        }
+                    }
+                    
+                    // Set exit price if window has ended
                     if (now >= window.end && !this.windowManager.exitPrice) {
                         this.windowManager.setExitPrice(referencePrice);
                     }
                     
+                    // Make prediction
                     const prediction = this.predictor.predict(this.priceHistory);
                     this.windowManager.setPrediction(prediction);
                     
+                    // Render prediction
                     this.renderPrediction(prediction, confidence);
                     
+                    // Render chart
                     this.chartRenderer.render(this.priceHistory);
                     
+                    // Update stats
                     this.updateStats();
                     
                 } catch (error) {
