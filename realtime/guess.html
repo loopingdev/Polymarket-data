@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>BTC 15-Min Outcome Guesser (ET) — Binance + CoinGecko</title>
+  <title>BTC 15-Min Outcome Guesser (ET) </title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{
@@ -89,7 +89,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>⚡ BTC 15-Min Outcome Guesser (ET) — Binance + CoinGecko</h1>
+    <h1>⚡ BTC 15-Min Outcome Guesser (ET) </h1>
 
     <div id="debugInfo" class="debug-info"></div>
 
@@ -369,6 +369,26 @@ class BinanceProvider extends BaseProvider {
   }
 }
 
+
+class CoinbaseProvider extends BaseProvider {
+  constructor() {
+    super('Coinbase');
+    this.minInterval = 3000;
+  }
+
+  async getCurrentPrice() {
+    if (this.shouldSkip()) throw new Error('Max errors reached');
+
+    const url = 'https://api.coinbase.com/v2/prices/BTC-USD/spot';
+    const { data, latency } = await this.fetchWithRateLimit(url, { rateKey: 'price' });
+
+    const price = parseFloat(data?.data?.amount);
+    if (!Number.isFinite(price)) throw new Error('Bad price data');
+
+    return { price, latency };
+  }
+}
+
 class CoinGeckoProvider extends BaseProvider {
   constructor(){
     super('CoinGecko');
@@ -390,6 +410,7 @@ class PriceAggregator {
   constructor(){
     this.providers = [
       new BinanceProvider(),
+      new CoinbaseProvider(),
       new CoinGeckoProvider(),
     ];
     this.outlierThreshold = 0.0035; // 0.35%
