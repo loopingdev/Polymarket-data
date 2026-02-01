@@ -137,9 +137,9 @@
           <div class="prediction-direction" id="predictionDirection">LOADING...</div>
           <div class="prediction-probability" id="predictionProbability">---%</div>
 
-          <!-- ✅ Strong suggestion box -->
+          <!-- Strong suggestion -->
           <div id="tradeSuggestion" class="confidence-warning" style="display:none;"></div>
-          <!-- ✅ FINAL CALL (locked around T-8..T-7) -->
+          <!-- FINAL CALL (persisted across reload) -->
           <div id="finalCallBox" class="confidence-warning" style="display:none;"></div>
 
           <div class="prediction-why" id="predictionWhy">
@@ -230,7 +230,6 @@ const DebugLogger = {
 ========================= */
 const TimeUtils = {
   ET_TIMEZONE: 'America/New_York',
-
   getNowET(){ return new Date(); },
 
   formatET(date, format='full'){
@@ -544,12 +543,10 @@ class Indicators {
 
 /* =========================
    PREDICTION ENGINE
-   RECOMMENDATION:
-   - Add momentum8 + momentum12 (more window-aware)
-   - Reduce reliance on 3-min
 ========================= */
 class PredictionEngine {
   constructor(){
+    // more window-aware
     this.weights = {
       momentum3:  0.10,
       momentum5:  0.20,
@@ -625,9 +622,8 @@ class PredictionEngine {
 
 /* =========================
    WINDOW MANAGER
-   FIX:
-   - Only rotate window state in fetchData (not in 1s clock loop)
-   - Finalize previous window BEFORE resetting when possible
+   - Adds "hasSavedCurrentWindow" + tryFinalizeIfReady()
+   - Fixes "history not logged" edge cases
 ========================= */
 class WindowManager {
   constructor(){
@@ -635,6 +631,7 @@ class WindowManager {
     this.entryPrice = null;
     this.exitPrice = null;
     this.prediction = null;
+    this.hasSavedCurrentWindow = false;
   }
 
   update(now){
@@ -642,27 +639,24 @@ class WindowManager {
 
     if (!this.currentWindow){
       this.currentWindow = boundaries;
+      this.hasSavedCurrentWindow = false;
       return this.currentWindow;
     }
 
     if (boundaries.start.getTime() !== this.currentWindow.start.getTime()){
-      // finalize previous if complete
-      if (this.entryPrice && this.exitPrice && this.prediction){
-        this.finalizeWindow();
-      } else {
-        DebugLogger.add('Window rolled over but missing entry/exit/prediction -> not saved', 'error');
-      }
+      // finalize previous if complete and not yet saved
+      this.tryFinalizeIfReady();
 
       // reset for new window
       this.currentWindow = boundaries;
       this.entryPrice = null;
       this.exitPrice = null;
       this.prediction = null;
+      this.hasSavedCurrentWindow = false;
 
-      // reset app-level locks
+      // clear app locks
       if (window.app){
-        window.app.finalCall = null;
-        window.app.flipCandidate = null;
+        window.app.clearFinalCall();
       }
     }
 
@@ -684,6 +678,14 @@ class WindowManager {
   }
 
   setPrediction(prediction){ this.prediction = prediction; }
+
+  tryFinalizeIfReady(){
+    if (!this.currentWindow) return false;
+    if (this.hasSavedCurrentWindow) return false;
+    if (!this.entryPrice || !this.exitPrice || !this.prediction) return false;
+    this.finalizeWindow();
+    return true;
+  }
 
   finalizeWindow(){
     if (!this.currentWindow || !this.entryPrice || !this.exitPrice || !this.prediction) return;
@@ -707,6 +709,8 @@ class WindowManager {
       timestampClosed: Date.now(),
       indicators: this.prediction.indicators
     });
+
+    this.hasSavedCurrentWindow = true;
 
     DebugLogger.add(`Window finalized: ${correct?'✓':'✗'} Pred ${this.prediction.direction} | Actual ${actualDirection}`);
 
@@ -835,6 +839,8 @@ class ChartRenderer {
 
 /* =========================
    MAIN APP
+   - FINAL CALL persists across reload
+   - History always logs when ready
 ========================= */
 class App {
   constructor(){
@@ -847,11 +853,42 @@ class App {
     this.priceHistory = [];
     this.fetchInterval = 12000;
 
-    // ✅ stability / recommendation states
-    this.finalCall = null;       // locked around T-8..T-7
+    // locks / flip logic
+    this.finalCall = null;       // persisted
     this.flipCandidate = null;   // 2-step confirmation tracker
 
     this.init();
+  }
+
+  /* ===== FINAL CALL persistence ===== */
+  FINAL_KEY(){ return 'btc_guesser_final_call_v1'; }
+
+  saveFinalCall(){
+    try{
+      if (!this.finalCall){
+        localStorage.removeItem(this.FINAL_KEY());
+        return;
+      }
+      localStorage.setItem(this.FINAL_KEY(), JSON.stringify(this.finalCall));
+    } catch {}
+  }
+
+  loadFinalCall(){
+    try{
+      const raw = localStorage.getItem(this.FINAL_KEY());
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.windowEndMs || !parsed.dir) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  clearFinalCall(){
+    this.finalCall = null;
+    this.flipCandidate = null;
+    try{ localStorage.removeItem(this.FINAL_KEY()); } catch {}
   }
 
   async init(){
@@ -859,13 +896,16 @@ class App {
     this.updateTime();
     setInterval(()=>this.updateTime(), 1000);
 
+    // restore persisted final call
+    this.finalCall = this.loadFinalCall();
+
     await this.fetchData();
     setInterval(()=>this.fetchData(), this.fetchInterval);
 
     this.renderHistory();
   }
 
-  // display-only (no window state mutation here)
+  // display-only (no window mutation)
   updateTime(){
     const now = TimeUtils.getNowET();
     document.getElementById('currentTime').textContent = TimeUtils.formatET(now, 'time');
@@ -878,7 +918,7 @@ class App {
     document.getElementById('countdown').textContent = TimeUtils.formatCountdown(diff);
   }
 
-  // ✅ Strong suggestion (conviction)
+  // Strong suggestion (conviction)
   getTradeSuggestion(prediction, providerConfidence){
     const timeLeft = this.windowManager.getTimeUntilEnd();
     const ind = prediction.indicators || {};
@@ -905,10 +945,9 @@ class App {
 
     let action = 'NO TRADE';
     if (providerConfidence !== 'NO_DATA'){
-      if (prediction.direction === 'UP' && prediction.probability >= 65) action = 'LONG';
-      if (prediction.direction === 'DOWN' && prediction.probability >= 65) action = 'SHORT';
+      if (prediction.direction === 'UP' && prediction.probability >= 40) action = 'LONG';
+      if (prediction.direction === 'DOWN' && prediction.probability >= 40) action = 'SHORT';
     }
-
     let strength = 'WEAK';
     if (conviction >= 70) strength = 'STRONG';
     else if (conviction >= 55) strength = 'MEDIUM';
@@ -924,33 +963,33 @@ class App {
     return { action, conviction, strength, notes };
   }
 
-  // ✅ Recommendation: lock FINAL CALL around T-8..T-7
+  // Lock FINAL CALL around T-8..T-7
   maybeLockFinalCall(prediction, confidence){
     const win = this.windowManager.currentWindow;
     if (!win) return;
 
     const timeLeft = this.windowManager.getTimeUntilEnd(); // seconds
-    const LOCK_FROM = 8 * 60; // T-8
-    const LOCK_TO   = 7 * 60; // T-7 (small range so 12s polling won't miss)
+    const LOCK_FROM = 8 * 60;
+    const LOCK_TO   = 7 * 60;
 
     if (this.finalCall && this.finalCall.windowEndMs === win.end.getTime()) return;
 
     if (timeLeft <= LOCK_FROM && timeLeft >= LOCK_TO){
       this.finalCall = {
         windowEndMs: win.end.getTime(),
+        windowStartMs: win.start.getTime(),
         dir: prediction.direction,
         prob: prediction.probability,
         lockedAtMs: Date.now(),
         confidence
       };
       this.flipCandidate = null;
+      this.saveFinalCall();
       DebugLogger.add(`FINAL CALL locked: ${this.finalCall.dir} (${this.finalCall.prob}%)`);
     }
   }
 
-  // ✅ Allow flip only with:
-  // - major change (>=78% OR beats finalCall by +12%)
-  // - 2-step confirmation (2 consecutive fetch cycles)
+  // Flip after final lock only with major change + 2-step confirm
   applyFinalCallFlipRules(livePrediction){
     const win = this.windowManager.currentWindow;
     if (!win || !this.finalCall || this.finalCall.windowEndMs !== win.end.getTime()){
@@ -960,14 +999,15 @@ class App {
     const baseDir = this.finalCall.dir;
     const baseProb = this.finalCall.prob;
 
-    // same as base: keep base direction (optionally bump prob up)
     if (livePrediction.direction === baseDir){
       this.flipCandidate = null;
       const bumped = Math.max(baseProb, Math.min(95, livePrediction.probability));
+      // keep base dir; allow prob bump
+      this.finalCall.prob = bumped;
+      this.saveFinalCall();
       return { ...livePrediction, direction: baseDir, probability: bumped };
     }
 
-    // candidate flip
     const candidateDir = livePrediction.direction;
 
     const STRONG_PROB = 78;
@@ -979,7 +1019,6 @@ class App {
       return { ...livePrediction, direction: baseDir, probability: baseProb };
     }
 
-    // 2-step confirmation
     if (!this.flipCandidate || this.flipCandidate.dir !== candidateDir){
       this.flipCandidate = { dir: candidateDir, count: 1, bestProb: livePrediction.probability };
       return { ...livePrediction, direction: baseDir, probability: baseProb };
@@ -991,7 +1030,9 @@ class App {
     if (this.flipCandidate.count >= 2){
       this.finalCall.dir = candidateDir;
       this.finalCall.prob = Math.max(this.finalCall.prob, this.flipCandidate.bestProb);
+      this.finalCall.flippedAtMs = Date.now();
       this.flipCandidate = null;
+      this.saveFinalCall();
       DebugLogger.add(`FINAL CALL flipped (confirmed): ${this.finalCall.dir} (${this.finalCall.prob}%)`);
       return { ...livePrediction, direction: this.finalCall.dir, probability: this.finalCall.prob };
     }
@@ -1010,14 +1051,16 @@ class App {
     }
 
     const lockedTime = new Date(this.finalCall.lockedAtMs).toLocaleTimeString();
+    const flippedTime = this.finalCall.flippedAtMs ? new Date(this.finalCall.flippedAtMs).toLocaleTimeString() : null;
+
     box.style.display = 'inline-block';
     box.innerHTML = `
       <div style="font-weight:1000;">FINAL CALL: ${this.finalCall.dir} • ${this.finalCall.prob}%</div>
       <div style="margin-top:6px;font-weight:800;font-size:11px;line-height:1.35;text-align:left;">
-        • Locked time: ${lockedTime}<br>
-        • Lock zone: T-8..T-7<br>
-        • Flip rule: major change + 2-step confirm<br>
-        • Provider confidence: ${this.finalCall.confidence}
+        • Locked: ${lockedTime} (T-8..T-7)<br>
+        ${flippedTime ? `• Flipped: ${flippedTime} (major + 2-step)<br>` : ''}
+        • Provider confidence: ${this.finalCall.confidence}<br>
+        • Persist: YES (survives reload)
       </div>
     `;
   }
@@ -1025,9 +1068,14 @@ class App {
   async fetchData(){
     const now = TimeUtils.getNowET();
 
-    // ✅ update window state only when fetching (so finalize has data)
+    // Update window state only on fetch (so finalize has data)
     const win = this.windowManager.update(now);
     if (!win) return;
+
+    // If we restored a finalCall from reload but it's for a different window, clear it
+    if (this.finalCall && this.finalCall.windowEndMs !== win.end.getTime()){
+      this.clearFinalCall();
+    }
 
     try{
       const {referencePrice, providerData, confidence} = await this.aggregator.fetchAllPrices();
@@ -1073,17 +1121,17 @@ class App {
       // lock final call around T-8..T-7
       this.maybeLockFinalCall(prediction, confidence);
 
-      // after final call exists: apply flip rules (2-step + major change)
+      // apply flip rules if final call exists
       prediction = this.applyFinalCallFlipRules(prediction);
 
       this.windowManager.setPrediction(prediction);
 
-      // lock exit + finalize when window ended (even if "late")
-      if (now >= win.end && !this.windowManager.exitPrice){
-        this.windowManager.setExitPrice(referencePrice);
-        if (this.windowManager.entryPrice && this.windowManager.prediction){
-          this.windowManager.finalizeWindow();
+      // close guard: always try finalize after window ends
+      if (now >= win.end){
+        if (!this.windowManager.exitPrice){
+          this.windowManager.setExitPrice(referencePrice);
         }
+        this.windowManager.tryFinalizeIfReady();
       }
 
       this.renderPrediction(prediction, confidence);
@@ -1137,7 +1185,6 @@ class App {
         `<div class="warning">⚠️ Price confidence: ${confidence}. Prediction may be less reliable.</div>`;
     }
 
-    // ✅ Strong suggestion render
     const box = document.getElementById('tradeSuggestion');
     const sug = this.getTradeSuggestion(prediction, confidence);
     box.style.display = 'inline-block';
@@ -1216,7 +1263,9 @@ class App {
     reader.onload = (e) => {
       try{
         const data = JSON.parse(e.target.result);
-        this.storage.import(data);
+        const arr = Array.isArray(data) ? data : (Array.isArray(data.windows) ? data.windows : null);
+        if (!arr) throw new Error('Invalid history format');
+        this.storage.import(arr);
         this.renderHistory();
         alert('History imported successfully!');
       } catch (err){
