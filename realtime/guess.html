@@ -1,1383 +1,1031 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BTC 15-Min Outcome Guesser (ET) — Multi-Source</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #0a0e27;
-            color: #e0e0e0;
-            padding: 20px;
-            line-height: 1.6;
-        }
-        
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        
-        h1 {
-            text-align: center;
-            color: #4a9eff;
-            margin-bottom: 30px;
-            font-size: 28px;
-        }
-        
-        .header-section {
-            background: #1a1f3a;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            border: 1px solid #2a3f5f;
-        }
-        
-        .time-display {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 15px;
-        }
-        
-        .time-box {
-            background: #0f1729;
-            padding: 12px;
-            border-radius: 6px;
-            border: 1px solid #2a3f5f;
-        }
-        
-        .time-box label {
-            display: block;
-            font-size: 11px;
-            color: #888;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-        }
-        
-        .time-box .value {
-            font-size: 18px;
-            font-weight: 600;
-            color: #4a9eff;
-        }
-        
-        .countdown {
-            font-size: 24px !important;
-            color: #ff6b6b;
-        }
-        
-        .main-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        @media (max-width: 1000px) {
-            .main-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        .card {
-            background: #1a1f3a;
-            border-radius: 8px;
-            padding: 20px;
-            border: 1px solid #2a3f5f;
-        }
-        
-        .card h2 {
-            font-size: 18px;
-            margin-bottom: 15px;
-            color: #4a9eff;
-            border-bottom: 1px solid #2a3f5f;
-            padding-bottom: 10px;
-        }
-        
-        .prediction-display {
-            text-align: center;
-            padding: 20px;
-        }
-        
-        .prediction-direction {
-            font-size: 48px;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-        
-        .prediction-direction.UP {
-            color: #51cf66;
-        }
-        
-        .prediction-direction.DOWN {
-            color: #ff6b6b;
-        }
-        
-        .prediction-direction.FLAT {
-            color: #ffd93d;
-        }
-        
-        .prediction-probability {
-            font-size: 24px;
-            color: #888;
-            margin-bottom: 20px;
-        }
-        
-        .prediction-why {
-            text-align: left;
-            background: #0f1729;
-            padding: 15px;
-            border-radius: 6px;
-            margin-top: 15px;
-        }
-        
-        .prediction-why ul {
-            list-style: none;
-            padding-left: 0;
-        }
-        
-        .prediction-why li {
-            padding: 5px 0;
-            font-size: 13px;
-            color: #bbb;
-        }
-        
-        .provider-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-        
-        .provider-table th {
-            background: #0f1729;
-            padding: 10px;
-            text-align: left;
-            color: #888;
-            font-weight: 600;
-            border-bottom: 1px solid #2a3f5f;
-        }
-        
-        .provider-table td {
-            padding: 10px;
-            border-bottom: 1px solid #2a3f5f;
-        }
-        
-        .provider-status {
-            display: inline-block;
-            padding: 3px 8px;
-            border-radius: 3px;
-            font-size: 11px;
-            font-weight: 600;
-        }
-        
-        .provider-status.included {
-            background: #51cf66;
-            color: #000;
-        }
-        
-        .provider-status.excluded {
-            background: #ff6b6b;
-            color: #fff;
-        }
-        
-        .provider-status.error {
-            background: #888;
-            color: #fff;
-        }
-        
-        .chart-container {
-            position: relative;
-            height: 250px;
-            margin-top: 15px;
-        }
-        
-        canvas {
-            width: 100%;
-            height: 100%;
-            border-radius: 6px;
-            background: #0f1729;
-        }
-        
-        .history-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-        }
-        
-        .history-table th {
-            background: #0f1729;
-            padding: 8px;
-            text-align: left;
-            color: #888;
-            font-weight: 600;
-            border-bottom: 1px solid #2a3f5f;
-            cursor: pointer;
-            position: sticky;
-            top: 0;
-        }
-        
-        .history-table th:hover {
-            background: #1a2235;
-        }
-        
-        .history-table td {
-            padding: 8px;
-            border-bottom: 1px solid #2a3f5f;
-        }
-        
-        .history-container {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .correct-mark {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            text-align: center;
-            line-height: 16px;
-            font-weight: bold;
-            font-size: 11px;
-        }
-        
-        .correct-mark.yes {
-            background: #51cf66;
-            color: #000;
-        }
-        
-        .correct-mark.no {
-            background: #ff6b6b;
-            color: #fff;
-        }
-        
-        .correct-mark.pending {
-            background: #888;
-            color: #fff;
-        }
-        
-        .controls {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-        
-        button {
-            background: #4a9eff;
-            color: #fff;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
-            transition: background 0.2s;
-        }
-        
-        button:hover {
-            background: #357abd;
-        }
-        
-        button.danger {
-            background: #ff6b6b;
-        }
-        
-        .button.danger:hover {
-            background: #cc5555;
-        }
-        
-        .warning {
-            background: #ff922b;
-            color: #000;
-            padding: 10px;
-            border-radius: 6px;
-            margin-bottom: 15px;
-            font-size: 13px;
-            font-weight: 600;
-        }
-        
-        .confidence-warning {
-            background: #ffd93d;
-            color: #000;
-            padding: 5px 10px;
-            border-radius: 4px;
-            display: inline-block;
-            font-size: 11px;
-            font-weight: 600;
-            margin-top: 10px;
-        }
-        
-        .stats-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 10px;
-            margin-top: 15px;
-        }
-        
-        .stat-box {
-            background: #0f1729;
-            padding: 12px;
-            border-radius: 6px;
-            text-align: center;
-        }
-        
-        .stat-box label {
-            display: block;
-            font-size: 11px;
-            color: #888;
-            margin-bottom: 5px;
-        }
-        
-        .stat-box .value {
-            font-size: 20px;
-            font-weight: 600;
-            color: #4a9eff;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BTC 15-Min Outcome Guesser (ET) — Binance + CoinGecko</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,sans-serif;
+      background:#0a0e27;color:#e0e0e0;padding:20px;line-height:1.6
+    }
+    .container{max-width:1400px;margin:0 auto}
+    h1{text-align:center;color:#4a9eff;margin-bottom:30px;font-size:28px}
+    .header-section{background:#1a1f3a;border-radius:8px;padding:20px;margin-bottom:20px;border:1px solid #2a3f5f}
+    .time-display{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-bottom:15px}
+    .time-box{background:#0f1729;padding:12px;border-radius:6px;border:1px solid #2a3f5f}
+    .time-box label{display:block;font-size:11px;color:#888;text-transform:uppercase;margin-bottom:5px}
+    .time-box .value{font-size:18px;font-weight:600;color:#4a9eff}
+    .countdown{font-size:24px!important;color:#ff6b6b}
 
-        .debug-info {
-            background: #1a1f3a;
-            border: 1px solid #ff6b6b;
-            border-radius: 6px;
-            padding: 10px;
-            margin-bottom: 20px;
-            font-size: 12px;
-            font-family: monospace;
-            color: #ff6b6b;
-            display: none;
-        }
+    .main-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+    @media (max-width:1000px){.main-grid{grid-template-columns:1fr}}
 
-        .debug-info.show {
-            display: block;
-        }
-    </style>
+    .card{background:#1a1f3a;border-radius:8px;padding:20px;border:1px solid #2a3f5f}
+    .card h2{font-size:18px;margin-bottom:15px;color:#4a9eff;border-bottom:1px solid #2a3f5f;padding-bottom:10px}
+
+    .prediction-display{text-align:center;padding:20px}
+    .prediction-direction{font-size:48px;font-weight:700;margin-bottom:10px}
+    .prediction-direction.UP{color:#51cf66}
+    .prediction-direction.DOWN{color:#ff6b6b}
+    .prediction-direction.FLAT{color:#ffd93d}
+    .prediction-probability{font-size:24px;color:#888;margin-bottom:20px}
+    .prediction-why{text-align:left;background:#0f1729;padding:15px;border-radius:6px;margin-top:15px}
+    .prediction-why ul{list-style:none;padding-left:0}
+    .prediction-why li{padding:5px 0;font-size:13px;color:#bbb}
+
+    .provider-table{width:100%;border-collapse:collapse;font-size:13px}
+    .provider-table th{background:#0f1729;padding:10px;text-align:left;color:#888;font-weight:600;border-bottom:1px solid #2a3f5f}
+    .provider-table td{padding:10px;border-bottom:1px solid #2a3f5f}
+    .provider-status{display:inline-block;padding:3px 8px;border-radius:3px;font-size:11px;font-weight:700}
+    .provider-status.included{background:#51cf66;color:#000}
+    .provider-status.excluded{background:#ff6b6b;color:#fff}
+    .provider-status.error{background:#888;color:#fff}
+    .provider-status.pending{background:#444;color:#fff}
+
+    .chart-container{position:relative;height:250px;margin-top:15px}
+    canvas{width:100%;height:100%;border-radius:6px;background:#0f1729}
+
+    .history-table{width:100%;border-collapse:collapse;font-size:12px}
+    .history-table th{
+      background:#0f1729;padding:8px;text-align:left;color:#888;font-weight:600;border-bottom:1px solid #2a3f5f;
+      cursor:pointer;position:sticky;top:0
+    }
+    .history-table th:hover{background:#1a2235}
+    .history-table td{padding:8px;border-bottom:1px solid #2a3f5f}
+    .history-container{max-height:400px;overflow-y:auto}
+
+    .correct-mark{display:inline-block;width:16px;height:16px;border-radius:50%;text-align:center;line-height:16px;font-weight:800;font-size:11px}
+    .correct-mark.yes{background:#51cf66;color:#000}
+    .correct-mark.no{background:#ff6b6b;color:#fff}
+    .correct-mark.pending{background:#888;color:#fff}
+
+    .controls{display:flex;gap:10px;margin-bottom:15px;flex-wrap:wrap}
+    button{
+      background:#4a9eff;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;
+      font-size:13px;font-weight:700;transition:background .2s
+    }
+    button:hover{background:#357abd}
+    button.danger{background:#ff6b6b}
+    button.danger:hover{background:#cc5555}
+
+    .warning{background:#ff922b;color:#000;padding:10px;border-radius:6px;margin-bottom:15px;font-size:13px;font-weight:800}
+    .confidence-warning{
+      background:#ffd93d;color:#000;padding:5px 10px;border-radius:4px;display:inline-block;font-size:11px;font-weight:800;margin-top:10px
+    }
+
+    .stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:15px}
+    .stat-box{background:#0f1729;padding:12px;border-radius:6px;text-align:center}
+    .stat-box label{display:block;font-size:11px;color:#888;margin-bottom:5px}
+    .stat-box .value{font-size:20px;font-weight:800;color:#4a9eff}
+
+    .debug-info{
+      background:#1a1f3a;border:1px solid #ff6b6b;border-radius:6px;padding:10px;margin-bottom:20px;
+      font-size:12px;font-family:monospace;color:#ff6b6b;display:none
+    }
+    .debug-info.show{display:block}
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>⚡ BTC 15-Min Outcome Guesser (ET) — Multi-Source</h1>
-        
-        <div id="debugInfo" class="debug-info"></div>
-        
-        <div class="header-section">
-            <div class="time-display">
-                <div class="time-box">
-                    <label>Current ET Time</label>
-                    <div class="value" id="currentTime">--:--:--</div>
-                </div>
-                <div class="time-box">
-                    <label>Window Start (ET)</label>
-                    <div class="value" id="windowStart">--:--:--</div>
-                </div>
-                <div class="time-box">
-                    <label>Window End (ET)</label>
-                    <div class="value" id="windowEnd">--:--:--</div>
-                </div>
-                <div class="time-box">
-                    <label>Time Until End</label>
-                    <div class="value countdown" id="countdown">--:--</div>
-                </div>
-            </div>
-            
-            <div class="stats-row">
-                <div class="stat-box">
-                    <label>Total Windows</label>
-                    <div class="value" id="totalWindows">0</div>
-                </div>
-                <div class="stat-box">
-                    <label>Correct</label>
-                    <div class="value" id="correctCount">0</div>
-                </div>
-                <div class="stat-box">
-                    <label>Accuracy</label>
-                    <div class="value" id="accuracy">--%</div>
-                </div>
-            </div>
+  <div class="container">
+    <h1>⚡ BTC 15-Min Outcome Guesser (ET) — Binance + CoinGecko</h1>
+
+    <div id="debugInfo" class="debug-info"></div>
+
+    <div class="header-section">
+      <div class="time-display">
+        <div class="time-box">
+          <label>Current ET Time</label>
+          <div class="value" id="currentTime">--:--:--</div>
         </div>
-        
-        <div class="main-grid">
-            <div class="card">
-                <h2>Current Prediction</h2>
-                <div id="predictionWarning"></div>
-                <div class="prediction-display">
-                    <div class="prediction-direction" id="predictionDirection">LOADING...</div>
-                    <div class="prediction-probability" id="predictionProbability">---%</div>
-                    <div class="prediction-why" id="predictionWhy">
-                        <strong>Why:</strong>
-                        <ul id="predictionReasons"></ul>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>Price Providers</h2>
-                <table class="provider-table">
-                    <thead>
-                        <tr>
-                            <th>Provider</th>
-                            <th>Price (USD)</th>
-                            <th>Latency</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="providerTableBody">
-                        <tr><td colspan="4">Loading...</td></tr>
-                    </tbody>
-                </table>
-                <div id="confidenceWarning"></div>
-            </div>
+        <div class="time-box">
+          <label>Window Start (ET)</label>
+          <div class="value" id="windowStart">--:--:--</div>
         </div>
-        
-        <div class="card">
-            <h2>Price Chart (Last 90 Minutes)</h2>
-            <div class="chart-container">
-                <canvas id="priceChart"></canvas>
-            </div>
+        <div class="time-box">
+          <label>Window End (ET)</label>
+          <div class="value" id="windowEnd">--:--:--</div>
         </div>
-        
-        <div class="card">
-            <h2>History</h2>
-            <div class="controls">
-                <button onclick="app.exportHistory()">📥 Export JSON</button>
-                <button onclick="document.getElementById('importFile').click()">📤 Import JSON</button>
-                <button class="danger" onclick="app.clearHistory()">🗑️ Clear History</button>
-                <input type="file" id="importFile" style="display: none;" accept=".json" onchange="app.importHistory(event)">
-            </div>
-            <div class="history-container">
-                <table class="history-table">
-                    <thead>
-                        <tr>
-                            <th onclick="app.sortHistory('timestamp')">Time ↕</th>
-                            <th>Window</th>
-                            <th>Predicted</th>
-                            <th>Actual</th>
-                            <th>Entry</th>
-                            <th>Exit</th>
-                            <th>Correct</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyTableBody">
-                        <tr><td colspan="7">No history yet</td></tr>
-                    </tbody>
-                </table>
-            </div>
+        <div class="time-box">
+          <label>Time Until End</label>
+          <div class="value countdown" id="countdown">--:--</div>
         </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-box">
+          <label>Total Windows</label>
+          <div class="value" id="totalWindows">0</div>
+        </div>
+        <div class="stat-box">
+          <label>Correct</label>
+          <div class="value" id="correctCount">0</div>
+        </div>
+        <div class="stat-box">
+          <label>Accuracy</label>
+          <div class="value" id="accuracy">--%</div>
+        </div>
+      </div>
     </div>
 
-    <script>
-        // Debug logger
-        const DebugLogger = {
-            logs: [],
-            add(message, type = 'info') {
-                const timestamp = new Date().toLocaleTimeString();
-                this.logs.push({ timestamp, message, type });
-                console.log(`[${timestamp}] ${message}`);
-                this.render();
-            },
-            render() {
-                const debugDiv = document.getElementById('debugInfo');
-                if (this.logs.length > 0) {
-                    debugDiv.classList.add('show');
-                    debugDiv.innerHTML = this.logs.slice(-5).map(log => 
-                        `[${log.timestamp}] ${log.message}`
-                    ).join('<br>');
-                }
-            }
-        };
+    <div class="main-grid">
+      <div class="card">
+        <h2>Current Prediction</h2>
+        <div id="predictionWarning"></div>
+        <div class="prediction-display">
+          <div class="prediction-direction" id="predictionDirection">LOADING...</div>
+          <div class="prediction-probability" id="predictionProbability">---%</div>
+          <div class="prediction-why" id="predictionWhy">
+            <strong>Why:</strong>
+            <ul id="predictionReasons"></ul>
+          </div>
+        </div>
+      </div>
 
-        // ===== TIMEZONE & TIME UTILITIES =====
-        const TimeUtils = {
-            ET_TIMEZONE: 'America/New_York',
-            
-            getNowET() {
-                return new Date();
-            },
-            
-            formatET(date, format = 'full') {
-                const options = format === 'full' 
-                    ? { timeZone: this.ET_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }
-                    : { timeZone: this.ET_TIMEZONE, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
-                return new Intl.DateTimeFormat('en-US', options).format(date);
-            },
-            
-            get15MinWindowBoundaries(date) {
-                const etParts = new Intl.DateTimeFormat('en-US', {
-                    timeZone: this.ET_TIMEZONE,
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: false
-                }).formatToParts(date);
-                
-                const parts = {};
-                etParts.forEach(p => parts[p.type] = p.value);
-                
-                const minutes = parseInt(parts.minute);
-                const flooredMinutes = Math.floor(minutes / 15) * 15;
-                
-                const startStr = `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${flooredMinutes.toString().padStart(2, '0')}:00`;
-                const startDate = this.parseETString(startStr);
-                
-                const endDate = new Date(startDate.getTime() + 15 * 60 * 1000);
-                
-                return { start: startDate, end: endDate };
-            },
-            
-            parseETString(etString) {
-                const parts = etString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-                
-                for (let offset = -12; offset <= 12; offset++) {
-                    const testDate = new Date(`${parts[1]}-${parts[2]}-${parts[3]}T${parts[4]}:${parts[5]}:${parts[6]}`);
-                    testDate.setHours(testDate.getHours() - offset);
-                    
-                    const etFormatter = new Intl.DateTimeFormat('en-US', {
-                        timeZone: this.ET_TIMEZONE,
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: false
-                    });
-                    
-                    const formatted = etFormatter.format(testDate).replace(/(\d+)\/(\d+)\/(\d+),/, '$3-$1-$2');
-                    if (formatted.includes(`${parts[4]}:${parts[5]}:${parts[6]}`)) {
-                        return testDate;
-                    }
-                }
-                
-                return new Date(etString);
-            },
-            
-            formatCountdown(seconds) {
-                if (seconds < 0) return '00:00';
-                const mins = Math.floor(seconds / 60);
-                const secs = seconds % 60;
-                return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-            }
-        };
+      <div class="card">
+        <h2>Price Providers</h2>
+        <table class="provider-table">
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Price (USD)</th>
+              <th>Latency</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="providerTableBody">
+            <tr><td colspan="4">Loading...</td></tr>
+          </tbody>
+        </table>
+        <div id="confidenceWarning"></div>
+      </div>
+    </div>
 
-        // ===== PRICE PROVIDERS =====
-        class BaseProvider {
-            constructor(name) {
-                this.name = name;
-                this.lastFetch = 0;
-                this.minInterval = 3000; // Reduced to 3s
-                this.cache = new Map();
-                this.errorCount = 0;
-                this.maxErrors = 5; // Increased tolerance
-            }
-            
-            async fetchWithRateLimit(url, options = {}) {
-                const now = Date.now();
-                if (now - this.lastFetch < this.minInterval) {
-                    throw new Error('Rate limit');
-                }
-                
-                this.lastFetch = now;
-                const start = Date.now();
-                
-                try {
-                    DebugLogger.add(`Fetching ${this.name}: ${url}`);
-                    const response = await fetch(url, {
-                        ...options,
-                        mode: 'cors',
-                        headers: {
-                            'Accept': 'application/json',
-                            ...options.headers
-                        }
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-                    
-                    const data = await response.json();
-                    this.errorCount = 0;
-                    const latency = Date.now() - start;
-                    DebugLogger.add(`${this.name} success (${latency}ms)`);
-                    return { data, latency };
-                } catch (error) {
-                    this.errorCount++;
-                    DebugLogger.add(`${this.name} error: ${error.message}`, 'error');
-                    throw error;
-                }
-            }
-            
-            shouldSkip() {
-                return this.errorCount >= this.maxErrors;
-            }
+    <div class="card">
+      <h2>Price Chart (Last 90 Minutes)</h2>
+      <div class="chart-container">
+        <canvas id="priceChart"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>History</h2>
+      <div class="controls">
+        <button onclick="app.exportHistory()">📥 Export JSON</button>
+        <button onclick="document.getElementById('importFile').click()">📤 Import JSON</button>
+        <button class="danger" onclick="app.clearHistory()">🗑️ Clear History</button>
+        <input type="file" id="importFile" style="display:none" accept=".json" onchange="app.importHistory(event)">
+      </div>
+      <div class="history-container">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th onclick="app.sortHistory('timestamp')">Time ↕</th>
+              <th>Window</th>
+              <th>Predicted</th>
+              <th>Actual</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Correct</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody">
+            <tr><td colspan="7">No history yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* =========================
+   DEBUG LOGGER
+========================= */
+const DebugLogger = {
+  logs: [],
+  add(message, type='info'){
+    const timestamp = new Date().toLocaleTimeString();
+    this.logs.push({timestamp, message, type});
+    console.log(`[${timestamp}] ${message}`);
+    this.render();
+  },
+  render(){
+    const div = document.getElementById('debugInfo');
+    if (this.logs.length > 0){
+      div.classList.add('show');
+      div.innerHTML = this.logs.slice(-6).map(l => `[${l.timestamp}] ${l.message}`).join('<br>');
+    }
+  }
+};
+
+/* =========================
+   TIME UTILS (ET)
+========================= */
+const TimeUtils = {
+  ET_TIMEZONE: 'America/New_York',
+
+  getNowET(){ return new Date(); },
+
+  formatET(date, format='full'){
+    const options = format === 'full'
+      ? {timeZone:this.ET_TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false}
+      : {timeZone:this.ET_TIMEZONE, hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false};
+    return new Intl.DateTimeFormat('en-US', options).format(date);
+  },
+
+  get15MinWindowBoundaries(date){
+    const etParts = new Intl.DateTimeFormat('en-US',{
+      timeZone:this.ET_TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
+    }).formatToParts(date);
+
+    const parts = {};
+    etParts.forEach(p => parts[p.type] = p.value);
+
+    const minutes = parseInt(parts.minute,10);
+    const flooredMinutes = Math.floor(minutes/15)*15;
+
+    const startStr = `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${String(flooredMinutes).padStart(2,'0')}:00`;
+    const startDate = this.parseETString(startStr);
+    const endDate = new Date(startDate.getTime() + 15*60*1000);
+    return {start:startDate, end:endDate};
+  },
+
+  // Keep your original parsing approach (works without libs)
+  parseETString(etString){
+    const m = etString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return new Date(etString);
+
+    const year=m[1], mo=m[2], day=m[3], hh=m[4], mm=m[5], ss=m[6];
+
+    for (let offset=-12; offset<=12; offset++){
+      const testDate = new Date(`${year}-${mo}-${day}T${hh}:${mm}:${ss}`);
+      testDate.setHours(testDate.getHours() - offset);
+
+      const etFormatter = new Intl.DateTimeFormat('en-US',{
+        timeZone:this.ET_TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit',
+        hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
+      });
+      const formatted = etFormatter.format(testDate).replace(/(\d+)\/(\d+)\/(\d+),/, '$3-$1-$2');
+      if (formatted.includes(`${hh}:${mm}:${ss}`)) return testDate;
+    }
+    return new Date(etString);
+  },
+
+  formatCountdown(seconds){
+    if (seconds < 0) return '00:00';
+    const mins = Math.floor(seconds/60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+  }
+};
+
+/* =========================
+   PROVIDERS + RATE LIMIT
+   FIX: rate limit per endpoint
+========================= */
+class BaseProvider {
+  constructor(name){
+    this.name = name;
+    this.minInterval = 3000;
+    this.lastFetchByKey = new Map();   // ✅ per-endpoint limiter
+    this.errorCount = 0;
+    this.maxErrors = 5;
+  }
+
+  shouldSkip(){ return this.errorCount >= this.maxErrors; }
+
+  async fetchWithRateLimit(url, options = {}){
+    const key = options.rateKey || 'default';
+    const now = Date.now();
+    const last = this.lastFetchByKey.get(key) || 0;
+
+    if (now - last < this.minInterval){
+      throw new Error('Rate limit');
+    }
+
+    this.lastFetchByKey.set(key, now);
+    const start = Date.now();
+
+    try{
+      DebugLogger.add(`Fetching ${this.name}(${key})`);
+      const response = await fetch(url, {
+        ...options,
+        mode:'cors',
+        headers: {
+          'Accept':'application/json',
+          ...(options.headers || {})
         }
+      });
 
-        class BinanceProvider extends BaseProvider {
-            constructor() {
-                super('Binance');
-            }
-            
-            async getCandles(startTime, endTime) {
-                if (this.shouldSkip()) throw new Error('Max errors reached');
-                
-                const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=100`;
-                
-                const { data, latency } = await this.fetchWithRateLimit(url);
-                
-                const candles = data.map(c => ({
-                    timestamp: c[0],
-                    open: parseFloat(c[1]),
-                    high: parseFloat(c[2]),
-                    low: parseFloat(c[3]),
-                    close: parseFloat(c[4]),
-                    volume: parseFloat(c[5])
-                }));
-                
-                return { candles, latency };
-            }
-            
-            async getCurrentPrice() {
-                if (this.shouldSkip()) throw new Error('Max errors reached');
-                
-                const url = 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT';
-                const { data, latency } = await this.fetchWithRateLimit(url);
-                
-                return { price: parseFloat(data.price), latency };
-            }
-        }
+      if (!response.ok){
+        // CoinGecko often returns 429; treat it as error but don’t "kill" provider too fast
+        const msg = `HTTP ${response.status}`;
+        throw new Error(msg);
+      }
 
-        class CoinGeckoProvider extends BaseProvider {
-            constructor() {
-                super('CoinGecko');
-            }
-            
-            async getCurrentPrice() {
-                if (this.shouldSkip()) throw new Error('Max errors reached');
-                
-                const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd';
-                const { data, latency } = await this.fetchWithRateLimit(url);
-                
-                return { price: data.bitcoin.usd, latency };
-            }
-        }
+      const data = await response.json();
+      this.errorCount = 0;
+      const latency = Date.now() - start;
+      DebugLogger.add(`${this.name}(${key}) ok (${latency}ms)`);
+      return {data, latency};
+    } catch (err){
+      // Don’t permanently ban on CoinGecko 429 too quickly (still counts, but you can tweak)
+      this.errorCount++;
+      DebugLogger.add(`${this.name}(${key}) error: ${err.message}`, 'error');
+      throw err;
+    }
+  }
+}
 
-        class CryptoCompareProvider extends BaseProvider {
-            constructor() {
-                super('CryptoCompare');
-            }
-            
-            async getCurrentPrice() {
-                if (this.shouldSkip()) throw new Error('Max errors reached');
-                
-                const url = 'https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD';
-                const { data, latency } = await this.fetchWithRateLimit(url);
-                
-                return { price: data.USD, latency };
-            }
-        }
+class BinanceProvider extends BaseProvider {
+  constructor(){
+    super('Binance');
+    this.minInterval = 1200; // Binance is usually fine; keep it responsive
+  }
 
-        // ===== PRICE AGGREGATOR =====
-        class PriceAggregator {
-            constructor() {
-                this.providers = [
-                    new BinanceProvider(),
-                    new CoinGeckoProvider(),
-                    new CryptoCompareProvider()
-                ];
-                this.outlierThreshold = 0.0035;
-                this.priceHistory = [];
-            }
-            
-            async fetchAllPrices() {
-                const results = await Promise.allSettled(
-                    this.providers.map(p => p.getCurrentPrice())
-                );
-                
-                const providerData = [];
-                const prices = [];
-                
-                results.forEach((result, idx) => {
-                    const provider = this.providers[idx];
-                    
-                    if (result.status === 'fulfilled') {
-                        providerData.push({
-                            name: provider.name,
-                            price: result.value.price,
-                            latency: result.value.latency,
-                            status: 'pending'
-                        });
-                        prices.push(result.value.price);
-                    } else {
-                        providerData.push({
-                            name: provider.name,
-                            price: null,
-                            latency: null,
-                            status: 'error',
-                            error: result.reason.message
-                        });
-                    }
-                });
-                
-                if (prices.length === 0) {
-                    return { referencePrice: null, providerData, confidence: 'NO_DATA' };
-                }
-                
-                const sortedPrices = [...prices].sort((a, b) => a - b);
-                const median = sortedPrices[Math.floor(sortedPrices.length / 2)];
-                
-                const validPrices = [];
-                providerData.forEach(pd => {
-                    if (pd.price !== null) {
-                        const deviation = Math.abs(pd.price - median) / median;
-                        if (deviation > this.outlierThreshold) {
-                            pd.status = 'excluded';
-                        } else {
-                            pd.status = 'included';
-                            validPrices.push(pd.price);
-                        }
-                    }
-                });
-                
-                let referencePrice, confidence;
-                if (validPrices.length >= 2) {
-                    const sorted = [...validPrices].sort((a, b) => a - b);
-                    referencePrice = sorted[Math.floor(sorted.length / 2)];
-                    confidence = 'HIGH';
-                } else if (validPrices.length === 1) {
-                    referencePrice = validPrices[0];
-                    confidence = 'LOW';
-                } else {
-                    referencePrice = null;
-                    confidence = 'NO_DATA';
-                }
-                
-                return { referencePrice, providerData, confidence };
-            }
-            
-            async fetchCandles(startTime, endTime) {
-                // Only Binance provides candles reliably with CORS
-                const binance = this.providers.find(p => p instanceof BinanceProvider);
-                
-                try {
-                    const result = await binance.getCandles(startTime, endTime);
-                    DebugLogger.add(`Fetched ${result.candles.length} candles`);
-                    return result.candles;
-                } catch (error) {
-                    DebugLogger.add(`Candle fetch failed: ${error.message}`, 'error');
-                    return [];
-                }
-            }
-        }
+  async getCurrentPrice(){
+    if (this.shouldSkip()) throw new Error('Max errors reached');
+    const url = 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT';
+    const {data, latency} = await this.fetchWithRateLimit(url, { rateKey:'price' });
+    return {price: parseFloat(data.price), latency};
+  }
 
-        // ===== INDICATORS =====
-        class Indicators {
-            static calculateReturns(prices, period) {
-                if (prices.length < period + 1) return 0;
-                const current = prices[prices.length - 1];
-                const past = prices[prices.length - 1 - period];
-                return (current - past) / past;
-            }
-            
-            static calculateSMA(prices, period) {
-                if (prices.length < period) return null;
-                const slice = prices.slice(-period);
-                return slice.reduce((a, b) => a + b, 0) / period;
-            }
-            
-            static calculateVolatility(prices, period) {
-                if (prices.length < period + 1) return 0;
-                
-                const returns = [];
-                for (let i = prices.length - period; i < prices.length; i++) {
-                    const ret = (prices[i] - prices[i - 1]) / prices[i - 1];
-                    returns.push(ret);
-                }
-                
-                const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-                const variance = returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
-                return Math.sqrt(variance);
-            }
-            
-            static calculateRSI(prices, period = 14) {
-                if (prices.length < period + 1) return 50;
-                
-                const changes = [];
-                for (let i = prices.length - period; i < prices.length; i++) {
-                    changes.push(prices[i] - prices[i - 1]);
-                }
-                
-                const gains = changes.filter(c => c > 0);
-                const losses = changes.filter(c => c < 0).map(c => Math.abs(c));
-                
-                const avgGain = gains.length > 0 ? gains.reduce((a, b) => a + b, 0) / period : 0;
-                const avgLoss = losses.length > 0 ? losses.reduce((a, b) => a + b, 0) / period : 0;
-                
-                if (avgLoss === 0) return 100;
-                const rs = avgGain / avgLoss;
-                return 100 - (100 / (1 + rs));
-            }
-        }
+  async getCandles(startTime, endTime){
+    if (this.shouldSkip()) throw new Error('Max errors reached');
+    const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=100`;
+    const {data, latency} = await this.fetchWithRateLimit(url, { rateKey:'candles' });
 
-        // ===== PREDICTION ENGINE =====
-        class PredictionEngine {
-            constructor() {
-                this.weights = {
-                    momentum3: 0.3,
-                    momentum5: 0.25,
-                    momentum10: 0.2,
-                    sma: 0.15,
-                    rsi: 0.1
-                };
-            }
-            
-            predict(priceHistory) {
-                if (priceHistory.length < 20) {
-                    return {
-                        direction: 'FLAT',
-                        probability: 50,
-                        reasons: [`Insufficient data (${priceHistory.length} candles, need 20+)`],
-                        indicators: {}
-                    };
-                }
-                
-                const prices = priceHistory.map(p => p.close);
-                
-                const momentum3 = Indicators.calculateReturns(prices, 3);
-                const momentum5 = Indicators.calculateReturns(prices, 5);
-                const momentum10 = Indicators.calculateReturns(prices, 10);
-                const sma5 = Indicators.calculateSMA(prices, 5);
-                const sma20 = Indicators.calculateSMA(prices, 20);
-                const volatility = Indicators.calculateVolatility(prices, 20);
-                const rsi = Indicators.calculateRSI(prices, 14);
-                
-                const currentPrice = prices[prices.length - 1];
-                
-                const signals = {
-                    momentum3: momentum3 > 0 ? 1 : -1,
-                    momentum5: momentum5 > 0 ? 1 : -1,
-                    momentum10: momentum10 > 0 ? 1 : -1,
-                    sma: sma5 > sma20 ? 1 : -1,
-                    rsi: rsi > 50 ? 1 : -1
-                };
-                
-                let score = 0;
-                score += signals.momentum3 * this.weights.momentum3 * Math.abs(momentum3) * 100;
-                score += signals.momentum5 * this.weights.momentum5 * Math.abs(momentum5) * 100;
-                score += signals.momentum10 * this.weights.momentum10 * Math.abs(momentum10) * 100;
-                score += signals.sma * this.weights.sma;
-                score += signals.rsi * this.weights.rsi * Math.abs(rsi - 50) / 50;
-                
-                let direction;
-                if (score > 0.05) direction = 'UP';
-                else if (score < -0.05) direction = 'DOWN';
-                else direction = 'FLAT';
-                
-                const probability = Math.min(95, Math.max(50, 50 + Math.abs(score) * 45));
-                
-                const reasons = [];
-                reasons.push(`3-min momentum: ${(momentum3 * 100).toFixed(3)}% (${signals.momentum3 > 0 ? 'UP' : 'DOWN'})`);
-                reasons.push(`5-min momentum: ${(momentum5 * 100).toFixed(3)}% (${signals.momentum5 > 0 ? 'UP' : 'DOWN'})`);
-                reasons.push(`10-min momentum: ${(momentum10 * 100).toFixed(3)}% (${signals.momentum10 > 0 ? 'UP' : 'DOWN'})`);
-                reasons.push(`SMA(5)=${sma5.toFixed(2)} vs SMA(20)=${sma20.toFixed(2)} (${signals.sma > 0 ? 'UP' : 'DOWN'})`);
-                reasons.push(`RSI(14)=${rsi.toFixed(1)} (${signals.rsi > 0 ? 'UP' : 'DOWN'})`);
-                reasons.push(`Volatility: ${(volatility * 100).toFixed(3)}%`);
-                
-                const indicators = {
-                    momentum3,
-                    momentum5,
-                    momentum10,
-                    sma5,
-                    sma20,
-                    volatility,
-                    rsi,
-                    score
-                };
-                
-                return { direction, probability: Math.round(probability), reasons, indicators };
-            }
-        }
+    const candles = data.map(c => ({
+      timestamp: c[0],
+      open: parseFloat(c[1]),
+      high: parseFloat(c[2]),
+      low: parseFloat(c[3]),
+      close: parseFloat(c[4]),
+      volume: parseFloat(c[5]),
+    }));
+    return {candles, latency};
+  }
+}
 
-        // ===== WINDOW MANAGER =====
-        class WindowManager {
-            constructor() {
-                this.currentWindow = null;
-                this.entryPrice = null;
-                this.exitPrice = null;
-                this.prediction = null;
-            }
-            
-            update(now) {
-                const boundaries = TimeUtils.get15MinWindowBoundaries(now);
-                
-                if (!this.currentWindow || boundaries.start.getTime() !== this.currentWindow.start.getTime()) {
-                    if (this.currentWindow && now >= this.currentWindow.end) {
-                        this.finalizeWindow();
-                    }
-                    
-                    this.currentWindow = boundaries;
-                    this.entryPrice = null;
-                    this.exitPrice = null;
-                    this.prediction = null;
-                }
-                
-                if (now >= this.currentWindow.end && !this.exitPrice) {
-                    this.finalizeWindow();
-                }
-                
-                return this.currentWindow;
-            }
-            
-            setEntryPrice(price) {
-                if (!this.entryPrice) {
-                    this.entryPrice = price;
-                    DebugLogger.add(`Entry price locked: $${price.toFixed(2)}`);
-                }
-            }
-            
-            setExitPrice(price) {
-                if (!this.exitPrice && this.currentWindow) {
-                    const now = TimeUtils.getNowET();
-                    if (now >= this.currentWindow.end) {
-                        this.exitPrice = price;
-                        DebugLogger.add(`Exit price locked: $${price.toFixed(2)}`);
-                    }
-                }
-            }
-            
-            setPrediction(prediction) {
-                this.prediction = prediction;
-            }
-            
-            finalizeWindow() {
-                if (!this.currentWindow || !this.entryPrice || !this.exitPrice || !this.prediction) {
-                    return;
-                }
-                
-                let actualDirection;
-                if (this.exitPrice > this.entryPrice) {
-                    actualDirection = 'UP';
-                } else if (this.exitPrice < this.entryPrice) {
-                    actualDirection = 'DOWN';
-                } else {
-                    actualDirection = 'FLAT';
-                }
-                
-                const correct = actualDirection === this.prediction.direction;
-                
-                app.storage.addWindow({
-                    windowStartET: this.currentWindow.start.getTime(),
-                    windowEndET: this.currentWindow.end.getTime(),
-                    entryPrice: this.entryPrice,
-                    exitPrice: this.exitPrice,
-                    predictedDirection: this.prediction.direction,
-                    predictedProbability: this.prediction.probability,
-                    actualDirection,
-                    correct,
-                    timestampCreated: Date.now(),
-                    timestampClosed: Date.now(),
-                    indicators: this.prediction.indicators
-                });
-                
-                DebugLogger.add(`Window finalized: ${correct ? '✓' : '✗'} Predicted ${this.prediction.direction}, Actual ${actualDirection}`);
-            }
-            
-            getTimeUntilEnd() {
-                if (!this.currentWindow) return 0;
-                const now = TimeUtils.getNowET();
-                const diff = Math.floor((this.currentWindow.end - now) / 1000);
-                return Math.max(0, diff);
-            }
-        }
+class CoinGeckoProvider extends BaseProvider {
+  constructor(){
+    super('CoinGecko');
+    this.minInterval = 15000; // ✅ reduce spam; CG free tier hates fast polling
+  }
 
-        // ===== STORAGE =====
-        class Storage {
-            constructor() {
-                this.SCHEMA_VERSION = 1;
-                this.MAX_WINDOWS = 500;
-                this.KEY = 'btc_guesser_history';
-            }
-            
-            load() {
-                try {
-                    const data = localStorage.getItem(this.KEY);
-                    if (!data) return [];
-                    
-                    const parsed = JSON.parse(data);
-                    if (parsed.version !== this.SCHEMA_VERSION) {
-                        console.warn('Schema version mismatch, clearing history');
-                        return [];
-                    }
-                    
-                    return parsed.windows || [];
-                } catch (error) {
-                    console.error('Failed to load history:', error);
-                    return [];
-                }
-            }
-            
-            save(windows) {
-                try {
-                    const data = {
-                        version: this.SCHEMA_VERSION,
-                        windows: windows.slice(-this.MAX_WINDOWS)
-                    };
-                    localStorage.setItem(this.KEY, JSON.stringify(data));
-                } catch (error) {
-                    console.error('Failed to save history:', error);
-                }
-            }
-            
-            addWindow(window) {
-                const windows = this.load();
-                windows.push(window);
-                this.save(windows);
-            }
-            
-            clear() {
-                localStorage.removeItem(this.KEY);
-            }
-            
-            export() {
-                return this.load();
-            }
-            
-            import(windows) {
-                this.save(windows);
-            }
-        }
+  async getCurrentPrice(){
+    if (this.shouldSkip()) throw new Error('Max errors reached');
+    const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd';
+    const {data, latency} = await this.fetchWithRateLimit(url, { rateKey:'price' });
+    return {price: data?.bitcoin?.usd ?? null, latency};
+  }
+}
 
-        // ===== CHART RENDERER =====
-        class ChartRenderer {
-            constructor(canvas) {
-                this.canvas = canvas;
-                this.ctx = canvas.getContext('2d');
-                this.padding = { top: 20, right: 50, bottom: 30, left: 10 };
-            }
-            
-            render(priceHistory) {
-                if (!priceHistory || priceHistory.length === 0) return;
-                
-                const rect = this.canvas.getBoundingClientRect();
-                this.canvas.width = rect.width;
-                this.canvas.height = rect.height;
-                
-                const { ctx, padding } = this;
-                const width = this.canvas.width;
-                const height = this.canvas.height;
-                
-                ctx.fillStyle = '#0f1729';
-                ctx.fillRect(0, 0, width, height);
-                
-                const prices = priceHistory.map(p => p.close);
-                const minPrice = Math.min(...prices);
-                const maxPrice = Math.max(...prices);
-                const priceRange = maxPrice - minPrice || 1;
-                
-                const chartWidth = width - padding.left - padding.right;
-                const chartHeight = height - padding.top - padding.bottom;
-                
-                ctx.strokeStyle = '#2a3f5f';
-                ctx.lineWidth = 1;
-                
-                for (let i = 0; i <= 4; i++) {
-                    const y = padding.top + (chartHeight / 4) * i;
-                    ctx.beginPath();
-                    ctx.moveTo(padding.left, y);
-                    ctx.lineTo(width - padding.right, y);
-                    ctx.stroke();
-                    
-                    const price = maxPrice - (priceRange / 4) * i;
-                    ctx.fillStyle = '#888';
-                    ctx.font = '11px monospace';
-                    ctx.textAlign = 'left';
-                    ctx.fillText(price.toFixed(0), width - padding.right + 5, y + 4);
-                }
-                
-                ctx.strokeStyle = '#4a9eff';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                
-                priceHistory.forEach((point, idx) => {
-                    const x = padding.left + (chartWidth / (priceHistory.length - 1)) * idx;
-                    const y = padding.top + chartHeight - ((point.close - minPrice) / priceRange) * chartHeight;
-                    
-                    if (idx === 0) {
-                        ctx.moveTo(x, y);
-                    } else {
-                        ctx.lineTo(x, y);
-                    }
-                });
-                
-                ctx.stroke();
-                
-                if (priceHistory.length > 0) {
-                    const lastPrice = priceHistory[priceHistory.length - 1].close;
-                    const y = padding.top + chartHeight - ((lastPrice - minPrice) / priceRange) * chartHeight;
-                    
-                    ctx.fillStyle = '#51cf66';
-                    ctx.beginPath();
-                    ctx.arc(width - padding.right, y, 4, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            }
-        }
+/* =========================
+   AGGREGATOR (REMOVED CRYPTOCOMPARE)
+========================= */
+class PriceAggregator {
+  constructor(){
+    this.providers = [
+      new BinanceProvider(),
+      new CoinGeckoProvider(),
+    ];
+    this.outlierThreshold = 0.0035; // 0.35%
+    this.lastCandles = [];
+    this.lastCandlesAt = 0;
+  }
 
-        // ===== MAIN APP =====
-        class App {
-            constructor() {
-                this.storage = new Storage();
-                this.aggregator = new PriceAggregator();
-                this.predictor = new PredictionEngine();
-                this.windowManager = new WindowManager();
-                this.chartRenderer = new ChartRenderer(document.getElementById('priceChart'));
-                
-                this.priceHistory = [];
-                this.lastDataFetch = 0;
-                this.fetchInterval = 10000; // 10 seconds
-                
-                this.init();
-            }
-            
-            async init() {
-                DebugLogger.add('App initializing...');
-                this.updateTime();
-                setInterval(() => this.updateTime(), 1000);
-                
-                await this.fetchData();
-                setInterval(() => this.fetchData(), this.fetchInterval);
-                
-                this.renderHistory();
-            }
-            
-            updateTime() {
-                const now = TimeUtils.getNowET();
-                
-                document.getElementById('currentTime').textContent = TimeUtils.formatET(now, 'time');
-                
-                const window = this.windowManager.update(now);
-                if (window) {
-                    document.getElementById('windowStart').textContent = TimeUtils.formatET(window.start, 'time');
-                    document.getElementById('windowEnd').textContent = TimeUtils.formatET(window.end, 'time');
-                    
-                    const timeUntilEnd = this.windowManager.getTimeUntilEnd();
-                    document.getElementById('countdown').textContent = TimeUtils.formatCountdown(timeUntilEnd);
-                }
-            }
-            
-            async fetchData() {
-                const now = TimeUtils.getNowET();
-                const window = this.windowManager.currentWindow;
-                
-                if (!window) return;
-                
-                try {
-                    const { referencePrice, providerData, confidence } = await this.aggregator.fetchAllPrices();
-                    
-                    this.renderProviderTable(providerData, referencePrice, confidence);
-                    
-                    if (!referencePrice) {
-                        document.getElementById('predictionDirection').textContent = 'NO DATA';
-                        document.getElementById('predictionProbability').textContent = '---%';
-                        return;
-                    }
-                    
-                    const lookback = 90 * 60 * 1000;
-                    const startTime = now.getTime() - lookback;
-                    const endTime = now.getTime();
-                    
-                    const candles = await this.aggregator.fetchCandles(startTime, endTime);
-                    
-                    if (!candles || candles.length === 0) {
-                        DebugLogger.add('No candles available - waiting...', 'warning');
-                        document.getElementById('predictionWarning').innerHTML = 
-                            '<div class="warning">⚠️ Waiting for historical data... This may take a minute on first load.</div>';
-                        
-                        // Use current price to create a simple placeholder
-                        this.priceHistory = [{ timestamp: now.getTime(), close: referencePrice }];
-                        return;
-                    }
-                    
-                    this.priceHistory = candles;
-                    DebugLogger.add(`Using ${candles.length} candles for analysis`);
-                    
-                    if (now >= window.start && !this.windowManager.entryPrice) {
-                        const entryCandle = candles.find(c => c.timestamp >= window.start.getTime());
-                        if (entryCandle) {
-                            this.windowManager.setEntryPrice(entryCandle.close);
-                        } else if (candles.length > 0) {
-                            this.windowManager.setEntryPrice(candles[candles.length - 1].close);
-                        }
-                    }
-                    
-                    if (now >= window.end && !this.windowManager.exitPrice) {
-                        this.windowManager.setExitPrice(referencePrice);
-                    }
-                    
-                    const prediction = this.predictor.predict(this.priceHistory);
-                    this.windowManager.setPrediction(prediction);
-                    
-                    this.renderPrediction(prediction, confidence);
-                    
-                    this.chartRenderer.render(this.priceHistory);
-                    
-                    this.updateStats();
-                    
-                } catch (error) {
-                    console.error('Data fetch error:', error);
-                    DebugLogger.add(`Fetch error: ${error.message}`, 'error');
-                    document.getElementById('predictionWarning').innerHTML = 
-                        `<div class="warning">⚠️ Error: ${error.message}</div>`;
-                }
-            }
-            
-            renderProviderTable(providerData, referencePrice, confidence) {
-                const tbody = document.getElementById('providerTableBody');
-                
-                tbody.innerHTML = providerData.map(pd => `
-                    <tr>
-                        <td><strong>${pd.name}</strong></td>
-                        <td>${pd.price !== null ? '$' + pd.price.toFixed(2) : '-'}</td>
-                        <td>${pd.latency !== null ? pd.latency + 'ms' : '-'}</td>
-                        <td>
-                            <span class="provider-status ${pd.status}">
-                                ${pd.status.toUpperCase()}
-                            </span>
-                        </td>
-                    </tr>
-                `).join('');
-                
-                const confidenceDiv = document.getElementById('confidenceWarning');
-                if (confidence === 'LOW') {
-                    confidenceDiv.innerHTML = '<div class="confidence-warning">⚠️ LOW CONFIDENCE - Only 1 provider available</div>';
-                } else if (confidence === 'NO_DATA') {
-                    confidenceDiv.innerHTML = '<div class="confidence-warning">❌ NO DATA - All providers failed</div>';
-                } else {
-                    confidenceDiv.innerHTML = '';
-                }
-                
-                if (referencePrice) {
-                    confidenceDiv.innerHTML += `<div style="margin-top: 10px; color: #51cf66; font-weight: 600;">Reference Price: $${referencePrice.toFixed(2)}</div>`;
-                }
-            }
-            
-            renderPrediction(prediction, confidence) {
-                const dirEl = document.getElementById('predictionDirection');
-                const probEl = document.getElementById('predictionProbability');
-                const whyEl = document.getElementById('predictionReasons');
-                
-                dirEl.textContent = prediction.direction;
-                dirEl.className = 'prediction-direction ' + prediction.direction;
-                
-                probEl.textContent = prediction.probability + '%';
-                
-                whyEl.innerHTML = prediction.reasons.map(r => `<li>${r}</li>`).join('');
-                
-                if (confidence === 'HIGH' && this.priceHistory.length >= 20) {
-                    document.getElementById('predictionWarning').innerHTML = '';
-                }
-            }
-            
-            updateStats() {
-                const history = this.storage.load();
-                const total = history.length;
-                const correct = history.filter(w => w.correct).length;
-                const accuracy = total > 0 ? ((correct / total) * 100).toFixed(1) : 0;
-                
-                document.getElementById('totalWindows').textContent = total;
-                document.getElementById('correctCount').textContent = correct;
-                document.getElementById('accuracy').textContent = accuracy + '%';
-            }
-            
-            renderHistory() {
-                const history = this.storage.load();
-                const tbody = document.getElementById('historyTableBody');
-                
-                if (history.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7">No history yet</td></tr>';
-                    return;
-                }
-                
-                const sorted = [...history].sort((a, b) => b.timestampCreated - a.timestampCreated);
-                
-                tbody.innerHTML = sorted.map(w => {
-                    const startTime = TimeUtils.formatET(new Date(w.windowStartET), 'time');
-                    const endTime = TimeUtils.formatET(new Date(w.windowEndET), 'time');
-                    
-                    let correctMark = '<span class="correct-mark pending">?</span>';
-                    if (w.actualDirection) {
-                        correctMark = w.correct 
-                            ? '<span class="correct-mark yes">✓</span>'
-                            : '<span class="correct-mark no">✗</span>';
-                    }
-                    
-                    return `
-                        <tr>
-                            <td>${new Date(w.timestampCreated).toLocaleString()}</td>
-                            <td>${startTime} - ${endTime}</td>
-                            <td><strong>${w.predictedDirection}</strong> (${w.predictedProbability}%)</td>
-                            <td><strong>${w.actualDirection || 'PENDING'}</strong></td>
-                            <td>$${w.entryPrice ? w.entryPrice.toFixed(2) : '-'}</td>
-                            <td>$${w.exitPrice ? w.exitPrice.toFixed(2) : '-'}</td>
-                            <td>${correctMark}</td>
-                        </tr>
-                    `;
-                }).join('');
-                
-                this.updateStats();
-            }
-            
-            exportHistory() {
-                const history = this.storage.export();
-                const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `btc-guesser-history-${Date.now()}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-            }
-            
-            importHistory(event) {
-                const file = event.target.files[0];
-                if (!file) return;
-                
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        const data = JSON.parse(e.target.result);
-                        this.storage.import(data);
-                        this.renderHistory();
-                        alert('History imported successfully!');
-                    } catch (error) {
-                        alert('Failed to import history: ' + error.message);
-                    }
-                };
-                reader.readAsText(file);
-            }
-            
-            clearHistory() {
-                if (confirm('Are you sure you want to clear all history? This cannot be undone.')) {
-                    this.storage.clear();
-                    this.renderHistory();
-                }
-            }
-            
-            sortHistory(field) {
-                this.renderHistory();
-            }
-        }
+  async fetchAllPrices(){
+    const results = await Promise.allSettled(this.providers.map(p => p.getCurrentPrice()));
+    const providerData = [];
+    const prices = [];
 
-        let app;
-        window.addEventListener('DOMContentLoaded', () => {
-            app = new App();
-            window.app = app;
+    results.forEach((result, idx) => {
+      const provider = this.providers[idx];
+      if (result.status === 'fulfilled' && typeof result.value.price === 'number'){
+        providerData.push({
+          name: provider.name,
+          price: result.value.price,
+          latency: result.value.latency,
+          status: 'pending'
         });
-    </script>
+        prices.push(result.value.price);
+      } else {
+        providerData.push({
+          name: provider.name,
+          price: null,
+          latency: null,
+          status: 'error',
+          error: result.status === 'rejected' ? result.reason?.message : 'Bad data'
+        });
+      }
+    });
+
+    if (prices.length === 0){
+      return { referencePrice: null, providerData, confidence: 'NO_DATA' };
+    }
+
+    const sortedPrices = [...prices].sort((a,b) => a-b);
+    const median = sortedPrices[Math.floor(sortedPrices.length/2)];
+
+    const validPrices = [];
+    providerData.forEach(pd => {
+      if (pd.price !== null){
+        const deviation = Math.abs(pd.price - median) / median;
+        if (deviation > this.outlierThreshold){
+          pd.status = 'excluded';
+        } else {
+          pd.status = 'included';
+          validPrices.push(pd.price);
+        }
+      }
+    });
+
+    let referencePrice = null;
+    let confidence = 'NO_DATA';
+
+    if (validPrices.length >= 2){
+      const s = [...validPrices].sort((a,b)=>a-b);
+      referencePrice = s[Math.floor(s.length/2)];
+      confidence = 'HIGH';
+    } else if (validPrices.length === 1){
+      referencePrice = validPrices[0];
+      confidence = 'LOW';
+    }
+
+    return { referencePrice, providerData, confidence };
+  }
+
+  async fetchCandles(startTime, endTime){
+    const binance = this.providers.find(p => p instanceof BinanceProvider);
+    if (!binance) return [];
+
+    try{
+      const res = await binance.getCandles(startTime, endTime);
+      DebugLogger.add(`Candles: ${res.candles.length}`);
+      this.lastCandles = res.candles;
+      this.lastCandlesAt = Date.now();
+      return res.candles;
+    } catch (err){
+      // If rate-limited or temporary issue, fall back to last candles if fresh
+      const ageMs = Date.now() - this.lastCandlesAt;
+      if (this.lastCandles.length > 0 && ageMs < 120000){
+        DebugLogger.add(`Candle fetch failed (${err.message}) -> using cached candles`);
+        return this.lastCandles;
+      }
+      DebugLogger.add(`Candle fetch failed: ${err.message}`, 'error');
+      return [];
+    }
+  }
+}
+
+/* =========================
+   INDICATORS
+========================= */
+class Indicators {
+  static calculateReturns(prices, period){
+    if (prices.length < period + 1) return 0;
+    const current = prices[prices.length-1];
+    const past = prices[prices.length-1-period];
+    return (current - past) / past;
+  }
+  static calculateSMA(prices, period){
+    if (prices.length < period) return null;
+    const slice = prices.slice(-period);
+    return slice.reduce((a,b)=>a+b,0)/period;
+  }
+  static calculateVolatility(prices, period){
+    if (prices.length < period + 1) return 0;
+    const returns = [];
+    for (let i = prices.length - period; i < prices.length; i++){
+      const ret = (prices[i] - prices[i-1]) / prices[i-1];
+      returns.push(ret);
+    }
+    const mean = returns.reduce((a,b)=>a+b,0)/returns.length;
+    const variance = returns.reduce((a,b)=>a+Math.pow(b-mean,2),0)/returns.length;
+    return Math.sqrt(variance);
+  }
+  static calculateRSI(prices, period=14){
+    if (prices.length < period + 1) return 50;
+    const changes = [];
+    for (let i = prices.length - period; i < prices.length; i++){
+      changes.push(prices[i] - prices[i-1]);
+    }
+    const gains = changes.filter(c=>c>0);
+    const losses = changes.filter(c=>c<0).map(c=>Math.abs(c));
+    const avgGain = gains.length ? gains.reduce((a,b)=>a+b,0)/period : 0;
+    const avgLoss = losses.length ? losses.reduce((a,b)=>a+b,0)/period : 0;
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100/(1+rs));
+  }
+}
+
+/* =========================
+   PREDICTION ENGINE
+========================= */
+class PredictionEngine {
+  constructor(){
+    this.weights = {
+      momentum3: 0.30,
+      momentum5: 0.25,
+      momentum10: 0.20,
+      sma: 0.15,
+      rsi: 0.10
+    };
+  }
+
+  predict(priceHistory){
+    if (!priceHistory || priceHistory.length < 20){
+      return {
+        direction:'FLAT',
+        probability:50,
+        reasons:[`Insufficient data (${priceHistory?.length||0} candles, need 20+)`],
+        indicators:{}
+      };
+    }
+
+    const prices = priceHistory.map(p=>p.close);
+
+    const momentum3  = Indicators.calculateReturns(prices,3);
+    const momentum5  = Indicators.calculateReturns(prices,5);
+    const momentum10 = Indicators.calculateReturns(prices,10);
+    const sma5  = Indicators.calculateSMA(prices,5);
+    const sma20 = Indicators.calculateSMA(prices,20);
+    const vol   = Indicators.calculateVolatility(prices,20);
+    const rsi   = Indicators.calculateRSI(prices,14);
+
+    const signals = {
+      momentum3:  momentum3  >= 0 ? 1 : -1,
+      momentum5:  momentum5  >= 0 ? 1 : -1,
+      momentum10: momentum10 >= 0 ? 1 : -1,
+      sma:        sma5 > sma20 ? 1 : -1,
+      rsi:        rsi >= 50 ? 1 : -1
+    };
+
+    let score = 0;
+    score += signals.momentum3  * this.weights.momentum3  * Math.abs(momentum3)  * 100;
+    score += signals.momentum5  * this.weights.momentum5  * Math.abs(momentum5)  * 100;
+    score += signals.momentum10 * this.weights.momentum10 * Math.abs(momentum10) * 100;
+    score += signals.sma        * this.weights.sma;
+    score += signals.rsi        * this.weights.rsi * (Math.abs(rsi-50)/50);
+
+    let direction = 'FLAT';
+    if (score > 0.05) direction = 'UP';
+    else if (score < -0.05) direction = 'DOWN';
+
+    const probability = Math.min(95, Math.max(50, 50 + Math.abs(score)*45));
+
+    const reasons = [
+      `3-min momentum: ${(momentum3*100).toFixed(3)}% (${signals.momentum3>0?'UP':'DOWN'})`,
+      `5-min momentum: ${(momentum5*100).toFixed(3)}% (${signals.momentum5>0?'UP':'DOWN'})`,
+      `10-min momentum: ${(momentum10*100).toFixed(3)}% (${signals.momentum10>0?'UP':'DOWN'})`,
+      `SMA(5)=${sma5.toFixed(2)} vs SMA(20)=${sma20.toFixed(2)} (${signals.sma>0?'UP':'DOWN'})`,
+      `RSI(14)=${rsi.toFixed(1)} (${signals.rsi>0?'UP':'DOWN'})`,
+      `Volatility: ${(vol*100).toFixed(3)}%`
+    ];
+
+    return {
+      direction,
+      probability: Math.round(probability),
+      reasons,
+      indicators: {momentum3,momentum5,momentum10,sma5,sma20,volatility:vol,rsi,score}
+    };
+  }
+}
+
+/* =========================
+   WINDOW MANAGER
+========================= */
+class WindowManager {
+  constructor(){
+    this.currentWindow = null;
+    this.entryPrice = null;
+    this.exitPrice = null;
+    this.prediction = null;
+  }
+
+  update(now){
+    const boundaries = TimeUtils.get15MinWindowBoundaries(now);
+
+    if (!this.currentWindow || boundaries.start.getTime() !== this.currentWindow.start.getTime()){
+      if (this.currentWindow && now >= this.currentWindow.end){
+        this.finalizeWindow();
+      }
+      this.currentWindow = boundaries;
+      this.entryPrice = null;
+      this.exitPrice = null;
+      this.prediction = null;
+    }
+
+    if (now >= this.currentWindow.end && !this.exitPrice){
+      this.finalizeWindow();
+    }
+
+    return this.currentWindow;
+  }
+
+  setEntryPrice(price){
+    if (!this.entryPrice && typeof price === 'number'){
+      this.entryPrice = price;
+      DebugLogger.add(`Entry locked: $${price.toFixed(2)}`);
+    }
+  }
+
+  setExitPrice(price){
+    if (!this.exitPrice && this.currentWindow){
+      const now = TimeUtils.getNowET();
+      if (now >= this.currentWindow.end && typeof price === 'number'){
+        this.exitPrice = price;
+        DebugLogger.add(`Exit locked: $${price.toFixed(2)}`);
+      }
+    }
+  }
+
+  setPrediction(prediction){ this.prediction = prediction; }
+
+  finalizeWindow(){
+    if (!this.currentWindow || !this.entryPrice || !this.exitPrice || !this.prediction) return;
+
+    let actualDirection = 'FLAT';
+    if (this.exitPrice > this.entryPrice) actualDirection = 'UP';
+    else if (this.exitPrice < this.entryPrice) actualDirection = 'DOWN';
+
+    const correct = actualDirection === this.prediction.direction;
+
+    app.storage.addWindow({
+      windowStartET: this.currentWindow.start.getTime(),
+      windowEndET: this.currentWindow.end.getTime(),
+      entryPrice: this.entryPrice,
+      exitPrice: this.exitPrice,
+      predictedDirection: this.prediction.direction,
+      predictedProbability: this.prediction.probability,
+      actualDirection,
+      correct,
+      timestampCreated: Date.now(),
+      timestampClosed: Date.now(),
+      indicators: this.prediction.indicators
+    });
+
+    DebugLogger.add(`Window finalized: ${correct?'✓':'✗'} Pred ${this.prediction.direction} | Actual ${actualDirection}`);
+  }
+
+  getTimeUntilEnd(){
+    if (!this.currentWindow) return 0;
+    const now = TimeUtils.getNowET();
+    const diff = Math.floor((this.currentWindow.end - now) / 1000);
+    return Math.max(0, diff);
+  }
+}
+
+/* =========================
+   STORAGE
+========================= */
+class Storage {
+  constructor(){
+    this.SCHEMA_VERSION = 1;
+    this.MAX_WINDOWS = 500;
+    this.KEY = 'btc_guesser_history';
+  }
+
+  load(){
+    try{
+      const data = localStorage.getItem(this.KEY);
+      if (!data) return [];
+      const parsed = JSON.parse(data);
+      if (parsed.version !== this.SCHEMA_VERSION) return [];
+      return parsed.windows || [];
+    } catch {
+      return [];
+    }
+  }
+
+  save(windows){
+    try{
+      localStorage.setItem(this.KEY, JSON.stringify({
+        version: this.SCHEMA_VERSION,
+        windows: windows.slice(-this.MAX_WINDOWS)
+      }));
+    } catch {}
+  }
+
+  addWindow(window){
+    const windows = this.load();
+    windows.push(window);
+    this.save(windows);
+  }
+
+  clear(){ localStorage.removeItem(this.KEY); }
+  export(){ return this.load(); }
+  import(windows){ this.save(windows); }
+}
+
+/* =========================
+   CHART RENDERER
+========================= */
+class ChartRenderer {
+  constructor(canvas){
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.padding = {top:20,right:50,bottom:30,left:10};
+  }
+
+  render(priceHistory){
+    if (!priceHistory || priceHistory.length === 0) return;
+
+    const rect = this.canvas.getBoundingClientRect();
+    this.canvas.width = rect.width;
+    this.canvas.height = rect.height;
+
+    const {ctx, padding} = this;
+    const width = this.canvas.width;
+    const height = this.canvas.height;
+
+    ctx.fillStyle = '#0f1729';
+    ctx.fillRect(0,0,width,height);
+
+    const prices = priceHistory.map(p=>p.close);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    const range = (maxPrice - minPrice) || 1;
+
+    const chartW = width - padding.left - padding.right;
+    const chartH = height - padding.top - padding.bottom;
+
+    // grid + labels
+    ctx.strokeStyle = '#2a3f5f';
+    ctx.lineWidth = 1;
+    for (let i=0;i<=4;i++){
+      const y = padding.top + (chartH/4)*i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(width - padding.right, y);
+      ctx.stroke();
+
+      const price = maxPrice - (range/4)*i;
+      ctx.fillStyle = '#888';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(price.toFixed(0), width - padding.right + 5, y + 4);
+    }
+
+    // line
+    ctx.strokeStyle = '#4a9eff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    priceHistory.forEach((pt, idx) => {
+      const x = padding.left + (chartW/(priceHistory.length-1))*idx;
+      const y = padding.top + chartH - ((pt.close - minPrice)/range)*chartH;
+      if (idx===0) ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+
+    // last point
+    const last = priceHistory[priceHistory.length-1]?.close;
+    const y = padding.top + chartH - ((last - minPrice)/range)*chartH;
+    ctx.fillStyle = '#51cf66';
+    ctx.beginPath();
+    ctx.arc(width - padding.right, y, 4, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+/* =========================
+   MAIN APP
+========================= */
+class App {
+  constructor(){
+    this.storage = new Storage();
+    this.aggregator = new PriceAggregator();
+    this.predictor = new PredictionEngine();
+    this.windowManager = new WindowManager();
+    this.chartRenderer = new ChartRenderer(document.getElementById('priceChart'));
+
+    this.priceHistory = [];
+    this.fetchInterval = 12000; // ✅ 12s (more friendly, still realtime)
+
+    this.init();
+  }
+
+  async init(){
+    DebugLogger.add('App initializing...');
+    this.updateTime();
+    setInterval(()=>this.updateTime(), 1000);
+
+    await this.fetchData();
+    setInterval(()=>this.fetchData(), this.fetchInterval);
+
+    this.renderHistory();
+  }
+
+  updateTime(){
+    const now = TimeUtils.getNowET();
+    document.getElementById('currentTime').textContent = TimeUtils.formatET(now, 'time');
+
+    const win = this.windowManager.update(now);
+    if (win){
+      document.getElementById('windowStart').textContent = TimeUtils.formatET(win.start, 'time');
+      document.getElementById('windowEnd').textContent = TimeUtils.formatET(win.end, 'time');
+      document.getElementById('countdown').textContent = TimeUtils.formatCountdown(this.windowManager.getTimeUntilEnd());
+    }
+  }
+
+  async fetchData(){
+    const now = TimeUtils.getNowET();
+    const win = this.windowManager.currentWindow;
+    if (!win) return;
+
+    try{
+      const {referencePrice, providerData, confidence} = await this.aggregator.fetchAllPrices();
+      this.renderProviderTable(providerData, referencePrice, confidence);
+
+      if (!referencePrice){
+        document.getElementById('predictionDirection').textContent = 'NO DATA';
+        document.getElementById('predictionProbability').textContent = '---%';
+        document.getElementById('predictionReasons').innerHTML = '<li>No providers available</li>';
+        return;
+      }
+
+      // candles lookback
+      const lookbackMs = 90*60*1000;
+      const startTime = now.getTime() - lookbackMs;
+      const endTime = now.getTime();
+
+      const candles = await this.aggregator.fetchCandles(startTime, endTime);
+
+      if (!candles || candles.length === 0){
+        document.getElementById('predictionWarning').innerHTML =
+          '<div class="warning">⚠️ Waiting for historical data (candles)...</div>';
+
+        // fallback minimal history so UI doesn't break
+        this.priceHistory = [{timestamp: now.getTime(), close: referencePrice}];
+        this.chartRenderer.render(this.priceHistory);
+        return;
+      }
+
+      this.priceHistory = candles;
+      document.getElementById('predictionWarning').innerHTML = '';
+
+      // entry price lock (use first candle at/after window start if possible)
+      if (now >= win.start && !this.windowManager.entryPrice){
+        const entryCandle = candles.find(c => c.timestamp >= win.start.getTime());
+        this.windowManager.setEntryPrice(entryCandle ? entryCandle.close : candles[candles.length-1].close);
+      }
+
+      // exit price lock when window ends
+      if (now >= win.end && !this.windowManager.exitPrice){
+        this.windowManager.setExitPrice(referencePrice);
+      }
+
+      const prediction = this.predictor.predict(this.priceHistory);
+      this.windowManager.setPrediction(prediction);
+
+      this.renderPrediction(prediction, confidence);
+      this.chartRenderer.render(this.priceHistory);
+      this.updateStats();
+    } catch (err){
+      DebugLogger.add(`Fetch error: ${err.message}`, 'error');
+      document.getElementById('predictionWarning').innerHTML = `<div class="warning">⚠️ Error: ${err.message}</div>`;
+    }
+  }
+
+  renderProviderTable(providerData, referencePrice, confidence){
+    const tbody = document.getElementById('providerTableBody');
+    tbody.innerHTML = providerData.map(pd => `
+      <tr>
+        <td><strong>${pd.name}</strong></td>
+        <td>${pd.price !== null ? '$' + pd.price.toFixed(2) : '-'}</td>
+        <td>${pd.latency !== null ? pd.latency + 'ms' : '-'}</td>
+        <td><span class="provider-status ${pd.status}">${pd.status.toUpperCase()}</span></td>
+      </tr>
+    `).join('');
+
+    const cdiv = document.getElementById('confidenceWarning');
+    if (confidence === 'LOW'){
+      cdiv.innerHTML = '<div class="confidence-warning">⚠️ LOW CONFIDENCE - Only 1 provider included</div>';
+    } else if (confidence === 'NO_DATA'){
+      cdiv.innerHTML = '<div class="confidence-warning">❌ NO DATA - All providers failed</div>';
+    } else {
+      cdiv.innerHTML = '';
+    }
+
+    if (referencePrice){
+      cdiv.innerHTML += `<div style="margin-top:10px;color:#51cf66;font-weight:800;">Reference Price: $${referencePrice.toFixed(2)}</div>`;
+    }
+  }
+
+  renderPrediction(prediction, confidence){
+    const dirEl = document.getElementById('predictionDirection');
+    const probEl = document.getElementById('predictionProbability');
+    const whyEl = document.getElementById('predictionReasons');
+
+    dirEl.textContent = prediction.direction;
+    dirEl.className = 'prediction-direction ' + prediction.direction;
+    probEl.textContent = prediction.probability + '%';
+    whyEl.innerHTML = prediction.reasons.map(r => `<li>${r}</li>`).join('');
+
+    // optional warning if low provider confidence
+    if (confidence !== 'HIGH'){
+      document.getElementById('predictionWarning').innerHTML =
+        `<div class="warning">⚠️ Price confidence: ${confidence}. Prediction may be less reliable.</div>`;
+    }
+  }
+
+  updateStats(){
+    const history = this.storage.load();
+    const total = history.length;
+    const correct = history.filter(w => w.correct).length;
+    const accuracy = total > 0 ? ((correct/total)*100).toFixed(1) : '0.0';
+
+    document.getElementById('totalWindows').textContent = total;
+    document.getElementById('correctCount').textContent = correct;
+    document.getElementById('accuracy').textContent = accuracy + '%';
+  }
+
+  renderHistory(){
+    const history = this.storage.load();
+    const tbody = document.getElementById('historyTableBody');
+
+    if (history.length === 0){
+      tbody.innerHTML = '<tr><td colspan="7">No history yet</td></tr>';
+      this.updateStats();
+      return;
+    }
+
+    const sorted = [...history].sort((a,b)=>b.timestampCreated - a.timestampCreated);
+    tbody.innerHTML = sorted.map(w => {
+      const startTime = TimeUtils.formatET(new Date(w.windowStartET), 'time');
+      const endTime = TimeUtils.formatET(new Date(w.windowEndET), 'time');
+
+      let correctMark = '<span class="correct-mark pending">?</span>';
+      if (w.actualDirection){
+        correctMark = w.correct
+          ? '<span class="correct-mark yes">✓</span>'
+          : '<span class="correct-mark no">✗</span>';
+      }
+
+      return `
+        <tr>
+          <td>${new Date(w.timestampCreated).toLocaleString()}</td>
+          <td>${startTime} - ${endTime}</td>
+          <td><strong>${w.predictedDirection}</strong> (${w.predictedProbability}%)</td>
+          <td><strong>${w.actualDirection || 'PENDING'}</strong></td>
+          <td>$${w.entryPrice ? w.entryPrice.toFixed(2) : '-'}</td>
+          <td>$${w.exitPrice ? w.exitPrice.toFixed(2) : '-'}</td>
+          <td>${correctMark}</td>
+        </tr>
+      `;
+    }).join('');
+
+    this.updateStats();
+  }
+
+  exportHistory(){
+    const history = this.storage.export();
+    const blob = new Blob([JSON.stringify(history,null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `btc-guesser-history-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  importHistory(event){
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try{
+        const data = JSON.parse(e.target.result);
+        this.storage.import(data);
+        this.renderHistory();
+        alert('History imported successfully!');
+      } catch (err){
+        alert('Failed to import history: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  clearHistory(){
+    if (confirm('Are you sure you want to clear all history? This cannot be undone.')){
+      this.storage.clear();
+      this.renderHistory();
+    }
+  }
+
+  sortHistory(){ this.renderHistory(); }
+}
+
+let app;
+window.addEventListener('DOMContentLoaded', () => {
+  app = new App();
+  window.app = app;
+});
+</script>
 </body>
 </html>
