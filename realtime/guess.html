@@ -139,6 +139,8 @@
 
           <!-- ✅ Strong suggestion box -->
           <div id="tradeSuggestion" class="confidence-warning" style="display:none;"></div>
+          <!-- ✅ FINAL CALL (locked around T-8..T-7) -->
+          <div id="finalCallBox" class="confidence-warning" style="display:none;"></div>
 
           <div class="prediction-why" id="predictionWhy">
             <strong>Why:</strong>
@@ -542,24 +544,28 @@ class Indicators {
 
 /* =========================
    PREDICTION ENGINE
+   RECOMMENDATION:
+   - Add momentum8 + momentum12 (more window-aware)
+   - Reduce reliance on 3-min
 ========================= */
 class PredictionEngine {
   constructor(){
     this.weights = {
-      momentum3: 0.30,
-      momentum5: 0.25,
-      momentum10: 0.20,
-      sma: 0.15,
-      rsi: 0.10
+      momentum3:  0.10,
+      momentum5:  0.20,
+      momentum8:  0.30,
+      momentum12: 0.20,
+      sma:        0.10,
+      rsi:        0.10
     };
   }
 
   predict(priceHistory){
-    if (!priceHistory || priceHistory.length < 20){
+    if (!priceHistory || priceHistory.length < 25){
       return {
         direction:'FLAT',
         probability:50,
-        reasons:[`Insufficient data (${priceHistory?.length||0} candles, need 20+)`],
+        reasons:[`Insufficient data (${priceHistory?.length||0} candles, need 25+)`],
         indicators:{}
       };
     }
@@ -568,7 +574,8 @@ class PredictionEngine {
 
     const momentum3  = Indicators.calculateReturns(prices,3);
     const momentum5  = Indicators.calculateReturns(prices,5);
-    const momentum10 = Indicators.calculateReturns(prices,10);
+    const momentum8  = Indicators.calculateReturns(prices,8);
+    const momentum12 = Indicators.calculateReturns(prices,12);
     const sma5  = Indicators.calculateSMA(prices,5);
     const sma20 = Indicators.calculateSMA(prices,20);
     const vol   = Indicators.calculateVolatility(prices,20);
@@ -577,7 +584,8 @@ class PredictionEngine {
     const signals = {
       momentum3:  momentum3  >= 0 ? 1 : -1,
       momentum5:  momentum5  >= 0 ? 1 : -1,
-      momentum10: momentum10 >= 0 ? 1 : -1,
+      momentum8:  momentum8  >= 0 ? 1 : -1,
+      momentum12: momentum12 >= 0 ? 1 : -1,
       sma:        sma5 > sma20 ? 1 : -1,
       rsi:        rsi >= 50 ? 1 : -1
     };
@@ -585,20 +593,22 @@ class PredictionEngine {
     let score = 0;
     score += signals.momentum3  * this.weights.momentum3  * Math.abs(momentum3)  * 100;
     score += signals.momentum5  * this.weights.momentum5  * Math.abs(momentum5)  * 100;
-    score += signals.momentum10 * this.weights.momentum10 * Math.abs(momentum10) * 100;
+    score += signals.momentum8  * this.weights.momentum8  * Math.abs(momentum8)  * 100;
+    score += signals.momentum12 * this.weights.momentum12 * Math.abs(momentum12) * 100;
     score += signals.sma        * this.weights.sma;
     score += signals.rsi        * this.weights.rsi * (Math.abs(rsi-50)/50);
 
     let direction = 'FLAT';
-    if (score > 0.05) direction = 'UP';
-    else if (score < -0.05) direction = 'DOWN';
+    if (score > 0.06) direction = 'UP';
+    else if (score < -0.06) direction = 'DOWN';
 
     const probability = Math.min(95, Math.max(50, 50 + Math.abs(score)*45));
 
     const reasons = [
       `3-min momentum: ${(momentum3*100).toFixed(3)}% (${signals.momentum3>0?'UP':'DOWN'})`,
       `5-min momentum: ${(momentum5*100).toFixed(3)}% (${signals.momentum5>0?'UP':'DOWN'})`,
-      `10-min momentum: ${(momentum10*100).toFixed(3)}% (${signals.momentum10>0?'UP':'DOWN'})`,
+      `8-min momentum: ${(momentum8*100).toFixed(3)}% (${signals.momentum8>0?'UP':'DOWN'})`,
+      `12-min momentum: ${(momentum12*100).toFixed(3)}% (${signals.momentum12>0?'UP':'DOWN'})`,
       `SMA(5)=${sma5.toFixed(2)} vs SMA(20)=${sma20.toFixed(2)} (${signals.sma>0?'UP':'DOWN'})`,
       `RSI(14)=${rsi.toFixed(1)} (${signals.rsi>0?'UP':'DOWN'})`,
       `Volatility: ${(vol*100).toFixed(3)}%`
@@ -608,14 +618,16 @@ class PredictionEngine {
       direction,
       probability: Math.round(probability),
       reasons,
-      indicators: {momentum3,momentum5,momentum10,sma5,sma20,volatility:vol,rsi,score}
+      indicators: {momentum3,momentum5,momentum8,momentum12,sma5,sma20,volatility:vol,rsi,score}
     };
   }
 }
 
 /* =========================
    WINDOW MANAGER
-   FIX: record window only when we have price (in fetchData)
+   FIX:
+   - Only rotate window state in fetchData (not in 1s clock loop)
+   - Finalize previous window BEFORE resetting when possible
 ========================= */
 class WindowManager {
   constructor(){
@@ -633,19 +645,25 @@ class WindowManager {
       return this.currentWindow;
     }
 
-    // If window rolled over
     if (boundaries.start.getTime() !== this.currentWindow.start.getTime()){
-      // ✅ finalize previous window if possible BEFORE resetting
+      // finalize previous if complete
       if (this.entryPrice && this.exitPrice && this.prediction){
         this.finalizeWindow();
       } else {
         DebugLogger.add('Window rolled over but missing entry/exit/prediction -> not saved', 'error');
       }
 
+      // reset for new window
       this.currentWindow = boundaries;
       this.entryPrice = null;
       this.exitPrice = null;
       this.prediction = null;
+
+      // reset app-level locks
+      if (window.app){
+        window.app.finalCall = null;
+        window.app.flipCandidate = null;
+      }
     }
 
     return this.currentWindow;
@@ -692,7 +710,6 @@ class WindowManager {
 
     DebugLogger.add(`Window finalized: ${correct?'✓':'✗'} Pred ${this.prediction.direction} | Actual ${actualDirection}`);
 
-    // ✅ instant UI refresh
     if (window.app && typeof window.app.renderHistory === 'function'){
       window.app.renderHistory();
     }
@@ -830,6 +847,10 @@ class App {
     this.priceHistory = [];
     this.fetchInterval = 12000;
 
+    // ✅ stability / recommendation states
+    this.finalCall = null;       // locked around T-8..T-7
+    this.flipCandidate = null;   // 2-step confirmation tracker
+
     this.init();
   }
 
@@ -844,7 +865,7 @@ class App {
     this.renderHistory();
   }
 
-  // ✅ display-only (no windowManager.update here)
+  // display-only (no window state mutation here)
   updateTime(){
     const now = TimeUtils.getNowET();
     document.getElementById('currentTime').textContent = TimeUtils.formatET(now, 'time');
@@ -857,6 +878,7 @@ class App {
     document.getElementById('countdown').textContent = TimeUtils.formatCountdown(diff);
   }
 
+  // ✅ Strong suggestion (conviction)
   getTradeSuggestion(prediction, providerConfidence){
     const timeLeft = this.windowManager.getTimeUntilEnd();
     const ind = prediction.indicators || {};
@@ -870,9 +892,9 @@ class App {
     if (vol > 0.0015) conviction -= 8;
     if (vol > 0.0030) conviction -= 15;
 
-    const m3 = ind.momentum3 ?? 0;
-    const m10 = ind.momentum10 ?? 0;
-    const aligned = (m3 >= 0 && m10 >= 0) || (m3 < 0 && m10 < 0);
+    const m5  = ind.momentum5 ?? 0;
+    const m12 = ind.momentum12 ?? 0;
+    const aligned = (m5 >= 0 && m12 >= 0) || (m5 < 0 && m12 < 0);
     if (aligned) conviction += 6;
     else conviction -= 6;
 
@@ -896,10 +918,108 @@ class App {
     notes.push(`Time left: ${TimeUtils.formatCountdown(timeLeft)}`);
     notes.push(`Provider confidence: ${providerConfidence}`);
     if (vol) notes.push(`Volatility: ${(vol*100).toFixed(3)}%`);
-    notes.push(`Momentum alignment: ${aligned ? 'YES' : 'NO'}`);
+    notes.push(`Momentum alignment (5m & 12m): ${aligned ? 'YES' : 'NO'}`);
     if (inLast2Min && prediction.probability < 65) notes.push('Late window: signal not strong enough');
 
     return { action, conviction, strength, notes };
+  }
+
+  // ✅ Recommendation: lock FINAL CALL around T-8..T-7
+  maybeLockFinalCall(prediction, confidence){
+    const win = this.windowManager.currentWindow;
+    if (!win) return;
+
+    const timeLeft = this.windowManager.getTimeUntilEnd(); // seconds
+    const LOCK_FROM = 8 * 60; // T-8
+    const LOCK_TO   = 7 * 60; // T-7 (small range so 12s polling won't miss)
+
+    if (this.finalCall && this.finalCall.windowEndMs === win.end.getTime()) return;
+
+    if (timeLeft <= LOCK_FROM && timeLeft >= LOCK_TO){
+      this.finalCall = {
+        windowEndMs: win.end.getTime(),
+        dir: prediction.direction,
+        prob: prediction.probability,
+        lockedAtMs: Date.now(),
+        confidence
+      };
+      this.flipCandidate = null;
+      DebugLogger.add(`FINAL CALL locked: ${this.finalCall.dir} (${this.finalCall.prob}%)`);
+    }
+  }
+
+  // ✅ Allow flip only with:
+  // - major change (>=78% OR beats finalCall by +12%)
+  // - 2-step confirmation (2 consecutive fetch cycles)
+  applyFinalCallFlipRules(livePrediction){
+    const win = this.windowManager.currentWindow;
+    if (!win || !this.finalCall || this.finalCall.windowEndMs !== win.end.getTime()){
+      return livePrediction;
+    }
+
+    const baseDir = this.finalCall.dir;
+    const baseProb = this.finalCall.prob;
+
+    // same as base: keep base direction (optionally bump prob up)
+    if (livePrediction.direction === baseDir){
+      this.flipCandidate = null;
+      const bumped = Math.max(baseProb, Math.min(95, livePrediction.probability));
+      return { ...livePrediction, direction: baseDir, probability: bumped };
+    }
+
+    // candidate flip
+    const candidateDir = livePrediction.direction;
+
+    const STRONG_PROB = 78;
+    const BEAT_MARGIN = 12;
+    const isMajor = (livePrediction.probability >= STRONG_PROB) ||
+                    (livePrediction.probability >= baseProb + BEAT_MARGIN);
+
+    if (!isMajor){
+      return { ...livePrediction, direction: baseDir, probability: baseProb };
+    }
+
+    // 2-step confirmation
+    if (!this.flipCandidate || this.flipCandidate.dir !== candidateDir){
+      this.flipCandidate = { dir: candidateDir, count: 1, bestProb: livePrediction.probability };
+      return { ...livePrediction, direction: baseDir, probability: baseProb };
+    }
+
+    this.flipCandidate.count += 1;
+    this.flipCandidate.bestProb = Math.max(this.flipCandidate.bestProb, livePrediction.probability);
+
+    if (this.flipCandidate.count >= 2){
+      this.finalCall.dir = candidateDir;
+      this.finalCall.prob = Math.max(this.finalCall.prob, this.flipCandidate.bestProb);
+      this.flipCandidate = null;
+      DebugLogger.add(`FINAL CALL flipped (confirmed): ${this.finalCall.dir} (${this.finalCall.prob}%)`);
+      return { ...livePrediction, direction: this.finalCall.dir, probability: this.finalCall.prob };
+    }
+
+    return { ...livePrediction, direction: baseDir, probability: baseProb };
+  }
+
+  renderFinalCall(){
+    const box = document.getElementById('finalCallBox');
+    if (!box) return;
+
+    if (!this.finalCall){
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+
+    const lockedTime = new Date(this.finalCall.lockedAtMs).toLocaleTimeString();
+    box.style.display = 'inline-block';
+    box.innerHTML = `
+      <div style="font-weight:1000;">FINAL CALL: ${this.finalCall.dir} • ${this.finalCall.prob}%</div>
+      <div style="margin-top:6px;font-weight:800;font-size:11px;line-height:1.35;text-align:left;">
+        • Locked time: ${lockedTime}<br>
+        • Lock zone: T-8..T-7<br>
+        • Flip rule: major change + 2-step confirm<br>
+        • Provider confidence: ${this.finalCall.confidence}
+      </div>
+    `;
   }
 
   async fetchData(){
@@ -918,10 +1038,10 @@ class App {
         document.getElementById('predictionProbability').textContent = '---%';
         document.getElementById('predictionReasons').innerHTML = '<li>No providers available</li>';
         document.getElementById('tradeSuggestion').style.display = 'none';
+        this.renderFinalCall();
         return;
       }
 
-      // candles lookback
       const lookbackMs = 90*60*1000;
       const startTime = now.getTime() - lookbackMs;
       const endTime = now.getTime();
@@ -934,6 +1054,7 @@ class App {
 
         this.priceHistory = [{timestamp: now.getTime(), close: referencePrice}];
         this.chartRenderer.render(this.priceHistory);
+        this.renderFinalCall();
         return;
       }
 
@@ -947,19 +1068,26 @@ class App {
       }
 
       // prediction
-      const prediction = this.predictor.predict(this.priceHistory);
+      let prediction = this.predictor.predict(this.priceHistory);
+
+      // lock final call around T-8..T-7
+      this.maybeLockFinalCall(prediction, confidence);
+
+      // after final call exists: apply flip rules (2-step + major change)
+      prediction = this.applyFinalCallFlipRules(prediction);
+
       this.windowManager.setPrediction(prediction);
 
-      // ✅ lock exit as soon as window ended (even if "late")
+      // lock exit + finalize when window ended (even if "late")
       if (now >= win.end && !this.windowManager.exitPrice){
         this.windowManager.setExitPrice(referencePrice);
-        // finalize immediately if everything ready
         if (this.windowManager.entryPrice && this.windowManager.prediction){
           this.windowManager.finalizeWindow();
         }
       }
 
       this.renderPrediction(prediction, confidence);
+      this.renderFinalCall();
       this.chartRenderer.render(this.priceHistory);
       this.updateStats();
       this.renderHistory();
