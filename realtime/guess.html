@@ -289,7 +289,7 @@
             background: #ff6b6b;
         }
         
-        button.danger:hover {
+        .button.danger:hover {
             background: #cc5555;
         }
         
@@ -340,11 +340,29 @@
             font-weight: 600;
             color: #4a9eff;
         }
+
+        .debug-info {
+            background: #1a1f3a;
+            border: 1px solid #ff6b6b;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 20px;
+            font-size: 12px;
+            font-family: monospace;
+            color: #ff6b6b;
+            display: none;
+        }
+
+        .debug-info.show {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>⚡ BTC 15-Min Outcome Guesser (ET) — Multi-Source</h1>
+        
+        <div id="debugInfo" class="debug-info"></div>
         
         <div class="header-section">
             <div class="time-display">
@@ -452,6 +470,26 @@
     </div>
 
     <script>
+        // Debug logger
+        const DebugLogger = {
+            logs: [],
+            add(message, type = 'info') {
+                const timestamp = new Date().toLocaleTimeString();
+                this.logs.push({ timestamp, message, type });
+                console.log(`[${timestamp}] ${message}`);
+                this.render();
+            },
+            render() {
+                const debugDiv = document.getElementById('debugInfo');
+                if (this.logs.length > 0) {
+                    debugDiv.classList.add('show');
+                    debugDiv.innerHTML = this.logs.slice(-5).map(log => 
+                        `[${log.timestamp}] ${log.message}`
+                    ).join('<br>');
+                }
+            }
+        };
+
         // ===== TIMEZONE & TIME UTILITIES =====
         const TimeUtils = {
             ET_TIMEZONE: 'America/New_York',
@@ -533,13 +571,13 @@
             constructor(name) {
                 this.name = name;
                 this.lastFetch = 0;
-                this.minInterval = 5000;
+                this.minInterval = 3000; // Reduced to 3s
                 this.cache = new Map();
                 this.errorCount = 0;
-                this.maxErrors = 3;
+                this.maxErrors = 5; // Increased tolerance
             }
             
-            async fetchWithRateLimit(url) {
+            async fetchWithRateLimit(url, options = {}) {
                 const now = Date.now();
                 if (now - this.lastFetch < this.minInterval) {
                     throw new Error('Rate limit');
@@ -549,55 +587,34 @@
                 const start = Date.now();
                 
                 try {
-                    const response = await fetch(url);
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    DebugLogger.add(`Fetching ${this.name}: ${url}`);
+                    const response = await fetch(url, {
+                        ...options,
+                        mode: 'cors',
+                        headers: {
+                            'Accept': 'application/json',
+                            ...options.headers
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    
                     const data = await response.json();
                     this.errorCount = 0;
-                    return { data, latency: Date.now() - start };
+                    const latency = Date.now() - start;
+                    DebugLogger.add(`${this.name} success (${latency}ms)`);
+                    return { data, latency };
                 } catch (error) {
                     this.errorCount++;
+                    DebugLogger.add(`${this.name} error: ${error.message}`, 'error');
                     throw error;
                 }
             }
             
             shouldSkip() {
                 return this.errorCount >= this.maxErrors;
-            }
-        }
-
-        class CoinbaseProvider extends BaseProvider {
-            constructor() {
-                super('Coinbase');
-            }
-            
-            async getCandles(startTime, endTime) {
-                if (this.shouldSkip()) throw new Error('Max errors reached');
-                
-                const start = new Date(startTime).toISOString();
-                const end = new Date(endTime).toISOString();
-                const url = `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=${start}&end=${end}`;
-                
-                const { data, latency } = await this.fetchWithRateLimit(url);
-                
-                const candles = data.map(c => ({
-                    timestamp: c[0] * 1000,
-                    open: c[3],
-                    high: c[2],
-                    low: c[1],
-                    close: c[4],
-                    volume: c[5]
-                })).sort((a, b) => a.timestamp - b.timestamp);
-                
-                return { candles, latency };
-            }
-            
-            async getCurrentPrice() {
-                if (this.shouldSkip()) throw new Error('Max errors reached');
-                
-                const url = 'https://api.exchange.coinbase.com/products/BTC-USD/ticker';
-                const { data, latency } = await this.fetchWithRateLimit(url);
-                
-                return { price: parseFloat(data.price), latency };
             }
         }
 
@@ -609,7 +626,7 @@
             async getCandles(startTime, endTime) {
                 if (this.shouldSkip()) throw new Error('Max errors reached');
                 
-                const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=1000`;
+                const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=100`;
                 
                 const { data, latency } = await this.fetchWithRateLimit(url);
                 
@@ -635,54 +652,33 @@
             }
         }
 
-        class KrakenProvider extends BaseProvider {
+        class CoinGeckoProvider extends BaseProvider {
             constructor() {
-                super('Kraken');
-            }
-            
-            async getCandles(startTime, endTime) {
-                if (this.shouldSkip()) throw new Error('Max errors reached');
-                
-                const since = Math.floor(startTime / 1000);
-                const url = `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1&since=${since}`;
-                
-                const { data, latency } = await this.fetchWithRateLimit(url);
-                
-                if (data.error && data.error.length > 0) {
-                    throw new Error(data.error[0]);
-                }
-                
-                const ohlcData = data.result.XXBTZUSD || data.result.XBTUSD;
-                if (!ohlcData) throw new Error('No data');
-                
-                const candles = ohlcData
-                    .map(c => ({
-                        timestamp: c[0] * 1000,
-                        open: parseFloat(c[1]),
-                        high: parseFloat(c[2]),
-                        low: parseFloat(c[3]),
-                        close: parseFloat(c[4]),
-                        volume: parseFloat(c[6])
-                    }))
-                    .filter(c => c.timestamp <= endTime);
-                
-                return { candles, latency };
+                super('CoinGecko');
             }
             
             async getCurrentPrice() {
                 if (this.shouldSkip()) throw new Error('Max errors reached');
                 
-                const url = 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD';
+                const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd';
                 const { data, latency } = await this.fetchWithRateLimit(url);
                 
-                if (data.error && data.error.length > 0) {
-                    throw new Error(data.error[0]);
-                }
+                return { price: data.bitcoin.usd, latency };
+            }
+        }
+
+        class CryptoCompareProvider extends BaseProvider {
+            constructor() {
+                super('CryptoCompare');
+            }
+            
+            async getCurrentPrice() {
+                if (this.shouldSkip()) throw new Error('Max errors reached');
                 
-                const ticker = data.result.XXBTZUSD || data.result.XBTUSD;
-                const price = parseFloat(ticker.c[0]);
+                const url = 'https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD';
+                const { data, latency } = await this.fetchWithRateLimit(url);
                 
-                return { price, latency };
+                return { price: data.USD, latency };
             }
         }
 
@@ -690,9 +686,9 @@
         class PriceAggregator {
             constructor() {
                 this.providers = [
-                    new CoinbaseProvider(),
                     new BinanceProvider(),
-                    new KrakenProvider()
+                    new CoinGeckoProvider(),
+                    new CryptoCompareProvider()
                 ];
                 this.outlierThreshold = 0.0035;
                 this.priceHistory = [];
@@ -765,35 +761,17 @@
             }
             
             async fetchCandles(startTime, endTime) {
-                const results = await Promise.allSettled(
-                    this.providers.map(p => p.getCandles(startTime, endTime))
-                );
+                // Only Binance provides candles reliably with CORS
+                const binance = this.providers.find(p => p instanceof BinanceProvider);
                 
-                const allCandles = [];
-                results.forEach((result, idx) => {
-                    if (result.status === 'fulfilled') {
-                        allCandles.push(...result.value.candles);
-                    }
-                });
-                
-                const candleMap = new Map();
-                allCandles.forEach(candle => {
-                    const key = candle.timestamp;
-                    if (!candleMap.has(key)) {
-                        candleMap.set(key, []);
-                    }
-                    candleMap.get(key).push(candle.close);
-                });
-                
-                const mergedCandles = [];
-                candleMap.forEach((prices, timestamp) => {
-                    const sorted = [...prices].sort((a, b) => a - b);
-                    const median = sorted[Math.floor(sorted.length / 2)];
-                    mergedCandles.push({ timestamp, close: median });
-                });
-                
-                mergedCandles.sort((a, b) => a.timestamp - b.timestamp);
-                return mergedCandles;
+                try {
+                    const result = await binance.getCandles(startTime, endTime);
+                    DebugLogger.add(`Fetched ${result.candles.length} candles`);
+                    return result.candles;
+                } catch (error) {
+                    DebugLogger.add(`Candle fetch failed: ${error.message}`, 'error');
+                    return [];
+                }
             }
         }
 
@@ -863,7 +841,7 @@
                     return {
                         direction: 'FLAT',
                         probability: 50,
-                        reasons: ['Insufficient data for prediction'],
+                        reasons: [`Insufficient data (${priceHistory.length} candles, need 20+)`],
                         indicators: {}
                     };
                 }
@@ -958,6 +936,7 @@
             setEntryPrice(price) {
                 if (!this.entryPrice) {
                     this.entryPrice = price;
+                    DebugLogger.add(`Entry price locked: $${price.toFixed(2)}`);
                 }
             }
             
@@ -966,6 +945,7 @@
                     const now = TimeUtils.getNowET();
                     if (now >= this.currentWindow.end) {
                         this.exitPrice = price;
+                        DebugLogger.add(`Exit price locked: $${price.toFixed(2)}`);
                     }
                 }
             }
@@ -1003,6 +983,8 @@
                     timestampClosed: Date.now(),
                     indicators: this.prediction.indicators
                 });
+                
+                DebugLogger.add(`Window finalized: ${correct ? '✓' : '✗'} Predicted ${this.prediction.direction}, Actual ${actualDirection}`);
             }
             
             getTimeUntilEnd() {
@@ -1157,12 +1139,13 @@
                 
                 this.priceHistory = [];
                 this.lastDataFetch = 0;
-                this.fetchInterval = 8000;
+                this.fetchInterval = 10000; // 10 seconds
                 
                 this.init();
             }
             
             async init() {
+                DebugLogger.add('App initializing...');
                 this.updateTime();
                 setInterval(() => this.updateTime(), 1000);
                 
@@ -1210,50 +1193,46 @@
                     
                     const candles = await this.aggregator.fetchCandles(startTime, endTime);
                     
-                    // Check if we have any candles
                     if (!candles || candles.length === 0) {
-                        console.warn('No candles available');
+                        DebugLogger.add('No candles available - waiting...', 'warning');
                         document.getElementById('predictionWarning').innerHTML = 
-                            '<div class="warning">⚠️ No historical data available yet. Waiting for candles...</div>';
+                            '<div class="warning">⚠️ Waiting for historical data... This may take a minute on first load.</div>';
+                        
+                        // Use current price to create a simple placeholder
+                        this.priceHistory = [{ timestamp: now.getTime(), close: referencePrice }];
                         return;
                     }
                     
                     this.priceHistory = candles;
+                    DebugLogger.add(`Using ${candles.length} candles for analysis`);
                     
-                    // Set entry price if we're at/after window start and don't have one yet
                     if (now >= window.start && !this.windowManager.entryPrice) {
                         const entryCandle = candles.find(c => c.timestamp >= window.start.getTime());
                         if (entryCandle) {
                             this.windowManager.setEntryPrice(entryCandle.close);
                         } else if (candles.length > 0) {
-                            // Use last available candle as proxy
                             this.windowManager.setEntryPrice(candles[candles.length - 1].close);
-                            console.log('Using proxy entry price from last candle');
                         }
                     }
                     
-                    // Set exit price if window has ended
                     if (now >= window.end && !this.windowManager.exitPrice) {
                         this.windowManager.setExitPrice(referencePrice);
                     }
                     
-                    // Make prediction
                     const prediction = this.predictor.predict(this.priceHistory);
                     this.windowManager.setPrediction(prediction);
                     
-                    // Render prediction
                     this.renderPrediction(prediction, confidence);
                     
-                    // Render chart
                     this.chartRenderer.render(this.priceHistory);
                     
-                    // Update stats
                     this.updateStats();
                     
                 } catch (error) {
                     console.error('Data fetch error:', error);
+                    DebugLogger.add(`Fetch error: ${error.message}`, 'error');
                     document.getElementById('predictionWarning').innerHTML = 
-                        `<div class="warning">⚠️ Error fetching data: ${error.message}</div>`;
+                        `<div class="warning">⚠️ Error: ${error.message}</div>`;
                 }
             }
             
@@ -1299,7 +1278,7 @@
                 
                 whyEl.innerHTML = prediction.reasons.map(r => `<li>${r}</li>`).join('');
                 
-                if (confidence === 'HIGH') {
+                if (confidence === 'HIGH' && this.priceHistory.length >= 20) {
                     document.getElementById('predictionWarning').innerHTML = '';
                 }
             }
