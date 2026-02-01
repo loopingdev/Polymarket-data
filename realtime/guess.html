@@ -54,7 +54,7 @@
     }
     .history-table th:hover{background:#1a2235}
     .history-table td{padding:8px;border-bottom:1px solid #2a3f5f}
-    .history-container{max-height:400px;overflow-y:auto}
+    .history-container{max-height:420px;overflow-y:auto}
 
     .correct-mark{display:inline-block;width:16px;height:16px;border-radius:50%;text-align:center;line-height:16px;font-weight:800;font-size:11px}
     .correct-mark.yes{background:#51cf66;color:#000}
@@ -79,6 +79,33 @@
     .stat-box{background:#0f1729;padding:12px;border-radius:6px;text-align:center}
     .stat-box label{display:block;font-size:11px;color:#888;margin-bottom:5px}
     .stat-box .value{font-size:20px;font-weight:800;color:#4a9eff}
+
+    /* NEW: session banner */
+    .banner{
+      background:#0f1729;border:1px solid #2a3f5f;border-radius:8px;padding:10px 12px;
+      display:none;margin-top:12px;font-size:12px;font-weight:900
+    }
+    .banner.show{display:block}
+    .banner .muted{color:#bbb;font-weight:800}
+    .banner .ok{color:#51cf66}
+    .banner .warn{color:#ffd93d}
+    .banner .bad{color:#ff6b6b}
+
+    /* NEW: deciding animation */
+    .deciding{
+      display:inline-flex;align-items:center;gap:8px;
+    }
+    .dots{display:inline-flex;gap:4px}
+    .dot{
+      width:6px;height:6px;border-radius:50%;background:#000;opacity:.25;
+      animation: blink 1.2s infinite;
+    }
+    .dot:nth-child(2){animation-delay:.2s}
+    .dot:nth-child(3){animation-delay:.4s}
+    @keyframes blink{
+      0%, 100% {opacity:.25; transform:translateY(0)}
+      50% {opacity:1; transform:translateY(-2px)}
+    }
 
     .debug-info{
       background:#1a1f3a;border:1px solid #ff6b6b;border-radius:6px;padding:10px;margin-bottom:20px;
@@ -123,10 +150,21 @@
           <div class="value" id="correctCount">0</div>
         </div>
         <div class="stat-box">
-          <label>Accuracy</label>
+          <label>Accuracy (Predicted only)</label>
           <div class="value" id="accuracy">--%</div>
         </div>
+        <div class="stat-box">
+          <label>Predicted</label>
+          <div class="value" id="predictedCount">0</div>
+        </div>
+        <div class="stat-box">
+          <label>Missed</label>
+          <div class="value" id="missedCount">0</div>
+        </div>
       </div>
+
+      <!-- NEW: banner (backfill + missed vs predicted summary) -->
+      <div id="sessionBanner" class="banner"></div>
     </div>
 
     <div class="main-grid">
@@ -138,7 +176,9 @@
           <div class="prediction-probability" id="predictionProbability">---%</div>
 
           <div id="tradeSuggestion" class="confidence-warning" style="display:none;"></div>
-          <div id="finalCallBox" class="confidence-warning" style="display:none;"></div>
+
+          <!-- FINAL LOCK status + result (always visible) -->
+          <div id="finalCallBox" class="confidence-warning" style="display:inline-block;"></div>
 
           <div class="prediction-why" id="predictionWhy">
             <strong>Why:</strong>
@@ -185,7 +225,7 @@
         <table class="history-table">
           <thead>
             <tr>
-              <th onclick="app.sortHistory('timestamp')">Time ↕</th>
+              <th>Time</th>
               <th>Window</th>
               <th>Predicted</th>
               <th>Actual</th>
@@ -307,7 +347,6 @@ class BaseProvider {
     }
 
     this.lastFetchByKey.set(key, now);
-    const start = Date.now();
 
     try{
       DebugLogger.add(`Fetching ${this.name}(${key})`);
@@ -321,15 +360,12 @@ class BaseProvider {
       });
 
       if (!response.ok){
-        const msg = `HTTP ${response.status}`;
-        throw new Error(msg);
+        throw new Error(`HTTP ${response.status}`);
       }
 
       const data = await response.json();
       this.errorCount = 0;
-      const latency = Date.now() - start;
-      DebugLogger.add(`${this.name}(${key}) ok (${latency}ms)`);
-      return {data, latency};
+      return {data};
     } catch (err){
       this.errorCount++;
       DebugLogger.add(`${this.name}(${key}) error: ${err.message}`, 'error');
@@ -347,8 +383,9 @@ class BinanceProvider extends BaseProvider {
   async getCurrentPrice(){
     if (this.shouldSkip()) throw new Error('Max errors reached');
     const url = 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT';
-    const {data, latency} = await this.fetchWithRateLimit(url, { rateKey:'price' });
-    return {price: parseFloat(data.price), latency};
+    const start = Date.now();
+    const {data} = await this.fetchWithRateLimit(url, { rateKey:'price' });
+    return {price: parseFloat(data.price), latency: Date.now()-start};
   }
 
   async getCandles(startTime, endTime){
@@ -367,32 +404,28 @@ class BinanceProvider extends BaseProvider {
     return {candles};
   }
 
-  // For backfill: get 1m candles for a range and map to 15m windows
   async getCandlesForBackfill(startTime, endTime){
     if (this.shouldSkip()) throw new Error('Max errors reached');
 
-    // Binance limit=1000 per request. We'll page.
     const out = [];
     let cursor = startTime;
-    const step = 1000 * 60 * 1000; // 1000 minutes
+    const step = 1000 * 60 * 1000;
+
     while (cursor < endTime){
       const chunkEnd = Math.min(endTime, cursor + step);
       const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${cursor}&endTime=${chunkEnd}&limit=1000`;
       const {data} = await this.fetchWithRateLimit(url, { rateKey:'backfill' });
+
       if (Array.isArray(data)){
-        data.forEach(c => out.push({
-          timestamp: c[0],
-          close: parseFloat(c[4]),
-        }));
+        data.forEach(c => out.push({ timestamp: c[0], close: parseFloat(c[4]) }));
       }
-      // move cursor forward (avoid infinite loop)
+
       if (data && data.length > 0){
         cursor = data[data.length - 1][0] + 60*1000;
       } else {
         cursor = chunkEnd + 60*1000;
       }
-      // gentle yield
-      await new Promise(r => setTimeout(r, 150));
+      await new Promise(r => setTimeout(r, 120));
     }
     return out;
   }
@@ -407,11 +440,12 @@ class CoinbaseProvider extends BaseProvider {
   async getCurrentPrice() {
     if (this.shouldSkip()) throw new Error('Max errors reached');
     const url = 'https://api.coinbase.com/v2/prices/BTC-USD/spot';
-    const { data, latency } = await this.fetchWithRateLimit(url, { rateKey: 'price' });
+    const start = Date.now();
+    const { data } = await this.fetchWithRateLimit(url, { rateKey: 'price' });
 
     const price = parseFloat(data?.data?.amount);
     if (!Number.isFinite(price)) throw new Error('Bad price data');
-    return { price, latency };
+    return { price, latency: Date.now()-start };
   }
 }
 
@@ -424,8 +458,9 @@ class CoinGeckoProvider extends BaseProvider {
   async getCurrentPrice(){
     if (this.shouldSkip()) throw new Error('Max errors reached');
     const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd';
-    const {data, latency} = await this.fetchWithRateLimit(url, { rateKey:'price' });
-    return {price: data?.bitcoin?.usd ?? null, latency};
+    const start = Date.now();
+    const {data} = await this.fetchWithRateLimit(url, { rateKey:'price' });
+    return {price: data?.bitcoin?.usd ?? null, latency: Date.now()-start};
   }
 }
 
@@ -506,7 +541,7 @@ class PriceAggregator {
   }
 
   async fetchCandles(startTime, endTime){
-    const binance = this.providers.find(p => p instanceof BinanceProvider);
+    const binance = this.getBinance();
     if (!binance) return [];
 
     try{
@@ -653,7 +688,6 @@ class PredictionEngine {
 
 /* =========================
    WINDOW MANAGER
-   - No rollover reset before close
 ========================= */
 class WindowManager {
   constructor(){
@@ -703,9 +737,7 @@ class WindowManager {
     }
   }
 
-  setPrediction(prediction){
-    this.prediction = prediction;
-  }
+  setPrediction(prediction){ this.prediction = prediction; }
 
   tryFinalizeIfReady(){
     if (!this.currentWindow) return false;
@@ -760,7 +792,7 @@ class WindowManager {
 class Storage {
   constructor(){
     this.SCHEMA_VERSION = 1;
-    this.MAX_WINDOWS = 2000;   // increased
+    this.MAX_WINDOWS = 2000;
     this.KEY = 'btc_guesser_history';
   }
 
@@ -871,8 +903,6 @@ class ChartRenderer {
 
 /* =========================
    MAIN APP
-   - Persist runtime state + final call across reload
-   - Backfill missed windows (actual-only) when reopened
 ========================= */
 class App {
   constructor(){
@@ -888,13 +918,17 @@ class App {
     this.finalCall = null;
     this.flipCandidate = null;
 
+    // UI/session state
+    this.lastBackfillAdded = 0;
+    this.bannerLastShownAt = 0;
+
     this.init();
   }
 
-  // ===== persistence keys =====
   FINAL_KEY(){ return 'btc_guesser_final_call_v1'; }
   STATE_KEY(){ return 'btc_guesser_runtime_state_v1'; }
   LAST_SEEN_KEY(){ return 'btc_guesser_last_seen_ms_v1'; }
+  BANNER_KEY(){ return 'btc_guesser_banner_state_v1'; }
 
   saveFinalCall(){
     try{
@@ -913,9 +947,7 @@ class App {
       const parsed = JSON.parse(raw);
       if (!parsed || !parsed.windowEndMs || !parsed.dir) return null;
       return parsed;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
 
   clearFinalCall(){
@@ -924,7 +956,6 @@ class App {
     try{ localStorage.removeItem(this.FINAL_KEY()); } catch {}
   }
 
-  // runtime state: current window + entry/exit/prediction snapshot
   saveRuntimeState(){
     try{
       const wm = this.windowManager;
@@ -938,7 +969,7 @@ class App {
           direction: wm.prediction.direction,
           probability: wm.prediction.probability,
           indicators: wm.prediction.indicators || {}
-        } : null,
+        } : null
       };
       localStorage.setItem(this.STATE_KEY(), JSON.stringify(payload));
     } catch {}
@@ -948,11 +979,8 @@ class App {
     try{
       const raw = localStorage.getItem(this.STATE_KEY());
       if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return parsed || null;
-    } catch {
-      return null;
-    }
+      return JSON.parse(raw) || null;
+    } catch { return null; }
   }
 
   clearRuntimeState(){
@@ -970,17 +998,27 @@ class App {
     } catch { return null; }
   }
 
+  saveBannerState(obj){
+    try{ localStorage.setItem(this.BANNER_KEY(), JSON.stringify(obj)); } catch {}
+  }
+
+  loadBannerState(){
+    try{
+      const raw = localStorage.getItem(this.BANNER_KEY());
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }
+
   async init(){
     DebugLogger.add('App initializing...');
     this.updateTime();
     setInterval(()=>this.updateTime(), 1000);
 
-    // restore persisted data
+    // restore
     this.finalCall = this.loadFinalCall();
 
     const state = this.loadRuntimeState();
     if (state && state.window){
-      // restore window boundary object
       this.windowManager.currentWindow = { start: new Date(state.window.start), end: new Date(state.window.end) };
       this.windowManager.entryPrice = state.entryPrice ?? null;
       this.windowManager.exitPrice = state.exitPrice ?? null;
@@ -989,15 +1027,25 @@ class App {
         this.windowManager.prediction = {
           direction: state.prediction.direction,
           probability: state.prediction.probability,
-          reasons: [], // will be refreshed on fetch
+          reasons: [],
           indicators: state.prediction.indicators || {}
         };
       }
       DebugLogger.add('Runtime state restored (window/entry/prediction)');
     }
 
-    // backfill missed windows since last seen (actual-only)
-    await this.backfillMissedWindows();
+    // restore banner state
+    const banner = this.loadBannerState();
+    if (banner && typeof banner.lastBackfillAdded === 'number'){
+      this.lastBackfillAdded = banner.lastBackfillAdded;
+      this.bannerLastShownAt = banner.bannerLastShownAt || 0;
+    }
+
+    // backfill missed windows
+    const added = await this.backfillMissedWindows();
+    this.lastBackfillAdded = added;
+    this.saveBannerState({ lastBackfillAdded: this.lastBackfillAdded, bannerLastShownAt: Date.now() });
+    this.showSessionBanner({ backfilled: added });
 
     await this.fetchData();
     setInterval(()=>this.fetchData(), this.fetchInterval);
@@ -1005,7 +1053,6 @@ class App {
     this.renderHistory();
   }
 
-  // display-only
   updateTime(){
     const now = TimeUtils.getNowET();
     document.getElementById('currentTime').textContent = TimeUtils.formatET(now, 'time');
@@ -1018,39 +1065,60 @@ class App {
     document.getElementById('countdown').textContent = TimeUtils.formatCountdown(diff);
   }
 
-  // ✅ backfill missed windows using Binance candles
+  showSessionBanner({backfilled=0} = {}){
+    const el = document.getElementById('sessionBanner');
+    if (!el) return;
+
+    const history = this.storage.load();
+    const missed = history.filter(w => w.predictedDirection === 'MISSED').length;
+    const predicted = history.length - missed;
+
+    const parts = [];
+    if (backfilled > 0){
+      parts.push(`<span class="ok">Backfilled ${backfilled} windows</span> <span class="muted">(tab was closed)</span>`);
+    } else {
+      parts.push(`<span class="muted">No backfill this session</span>`);
+    }
+
+    parts.push(`<span class="muted">•</span> Predicted: <span class="ok">${predicted}</span>`);
+    parts.push(`<span class="muted">•</span> Missed: <span class="${missed>0?'warn':'muted'}">${missed}</span>`);
+
+    el.innerHTML = parts.join(' ');
+    el.classList.add('show');
+
+    // auto-hide after 10s if nothing important
+    if (backfilled === 0 && missed === 0){
+      setTimeout(()=>{ el.classList.remove('show'); }, 10000);
+    }
+  }
+
   async backfillMissedWindows(){
     const lastSeen = this.getLastSeen();
     this.updateLastSeen();
 
-    if (!lastSeen) return;
+    if (!lastSeen) return 0;
 
     const now = Date.now();
-    // if gap < 2 minutes, skip
-    if (now - lastSeen < 2 * 60 * 1000) return;
+    if (now - lastSeen < 2 * 60 * 1000) return 0;
 
-    // cap backfill window to 24h to avoid huge loops
     const start = Math.max(lastSeen - 2*60*1000, now - 24*60*60*1000);
     const end = now;
 
     DebugLogger.add(`Backfill check: gap ${(now-lastSeen)/1000|0}s`);
 
     const binance = this.aggregator.getBinance();
-    if (!binance) return;
+    if (!binance) return 0;
 
     try{
       const candles = await binance.getCandlesForBackfill(start, end);
-      if (!candles || candles.length < 5) return;
+      if (!candles || candles.length < 5) return 0;
 
-      // Map 1m candles into 15m windows: entry = first candle >= window start, exit = last candle < window end
-      // We'll iterate through window boundaries between start..end
       let cursor = TimeUtils.get15MinWindowBoundaries(new Date(start)).start.getTime();
       const endBoundary = TimeUtils.get15MinWindowBoundaries(new Date(end)).end.getTime();
 
-      const byTs = candles; // already sorted by time from API
+      const byTs = candles;
       const findEntry = (ws) => byTs.find(c => c.timestamp >= ws)?.close ?? null;
       const findExit  = (we) => {
-        // last candle before window end
         for (let i = byTs.length - 1; i >= 0; i--){
           if (byTs[i].timestamp < we) return byTs[i].close;
         }
@@ -1062,10 +1130,7 @@ class App {
         const ws = cursor;
         const we = ws + 15*60*1000;
 
-        // Only backfill windows that fully ended before now (avoid current live window)
         if (we > now) break;
-
-        // Skip if already exists in history
         if (!this.storage.hasWindowEnd(we)){
           const entry = findEntry(ws);
           const exit = findExit(we);
@@ -1075,7 +1140,6 @@ class App {
             if (exit > entry) actualDirection = 'UP';
             else if (exit < entry) actualDirection = 'DOWN';
 
-            // Mark prediction as MISSED
             this.storage.addWindow({
               windowStartET: ws,
               windowEndET: we,
@@ -1092,21 +1156,20 @@ class App {
             added++;
           }
         }
-
         cursor = we;
       }
 
       if (added > 0){
         DebugLogger.add(`Backfill added: ${added} windows`);
-        this.renderHistory();
-        this.updateStats();
       }
+      return added;
     } catch (e){
       DebugLogger.add(`Backfill failed: ${e.message}`, 'error');
+      return 0;
     }
   }
 
-  // ✅ your requested action threshold (>= 40)
+  // User requested threshold (>= 40)
   getTradeSuggestion(prediction, providerConfidence){
     const timeLeft = this.windowManager.getTimeUntilEnd();
     const ind = prediction.indicators || {};
@@ -1128,7 +1191,6 @@ class App {
 
     conviction = Math.max(0, Math.min(100, Math.round(conviction)));
 
-    // ✅ CHANGED AS YOU ASKED
     let action = 'NO TRADE';
     if (providerConfidence !== 'NO_DATA'){
       if (prediction.direction === 'UP' && prediction.probability >= 40) action = 'LONG';
@@ -1175,7 +1237,6 @@ class App {
     }
   }
 
-  // Flip with major change + 2-step confirm
   applyFinalCallFlipRules(livePrediction){
     const win = this.windowManager.currentWindow;
     if (!win || !this.finalCall || this.finalCall.windowEndMs !== win.end.getTime()){
@@ -1225,44 +1286,73 @@ class App {
     return { ...livePrediction, direction: baseDir, probability: baseProb };
   }
 
+  // ✅ Always show: deciding / locked / flipped
   renderFinalCall(){
     const box = document.getElementById('finalCallBox');
     if (!box) return;
 
-    if (!this.finalCall){
-      box.style.display = 'none';
-      box.innerHTML = '';
+    const win = this.windowManager.currentWindow;
+    const timeLeft = this.windowManager.getTimeUntilEnd();
+
+    // show "deciding" from T-9 -> T-8
+    const DECIDE_FROM = 9 * 60;
+    const DECIDE_TO   = 8 * 60;
+
+    if (!win){
+      box.innerHTML = `<div style="font-weight:1000;">FINAL LOCK: <span class="muted">Waiting for window…</span></div>`;
       return;
     }
 
-    const lockedTime = new Date(this.finalCall.lockedAtMs).toLocaleTimeString();
-    const flippedTime = this.finalCall.flippedAtMs ? new Date(this.finalCall.flippedAtMs).toLocaleTimeString() : null;
+    // If locked
+    if (this.finalCall && this.finalCall.windowEndMs === win.end.getTime()){
+      const lockedTime = new Date(this.finalCall.lockedAtMs).toLocaleTimeString();
+      const flippedTime = this.finalCall.flippedAtMs ? new Date(this.finalCall.flippedAtMs).toLocaleTimeString() : null;
 
-    box.style.display = 'inline-block';
+      box.innerHTML = `
+        <div style="font-weight:1100;">FINAL LOCK ✅: ${this.finalCall.dir} • ${this.finalCall.prob}%</div>
+        <div style="margin-top:6px;font-weight:900;font-size:11px;line-height:1.35;text-align:left;">
+          • Locked: ${lockedTime} (T-8..T-7)<br>
+          ${flippedTime ? `• Flipped: ${flippedTime} (major + 2-step)<br>` : ''}
+          • Provider confidence: ${this.finalCall.confidence}<br>
+          • Reload safe: YES
+        </div>
+      `;
+      return;
+    }
+
+    // If deciding window
+    if (timeLeft <= DECIDE_FROM && timeLeft > DECIDE_TO){
+      box.innerHTML = `
+        <div style="font-weight:1100;">
+          FINAL LOCK: <span class="deciding">Deciding<span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></span>
+        </div>
+        <div style="margin-top:6px;font-weight:900;font-size:11px;text-align:left;">
+          • Lock target: T-8..T-7<br>
+          • Time left: ${TimeUtils.formatCountdown(timeLeft)}
+        </div>
+      `;
+      return;
+    }
+
+    // Default: waiting
     box.innerHTML = `
-      <div style="font-weight:1000;">FINAL CALL: ${this.finalCall.dir} • ${this.finalCall.prob}%</div>
-      <div style="margin-top:6px;font-weight:800;font-size:11px;line-height:1.35;text-align:left;">
-        • Locked: ${lockedTime} (T-8..T-7)<br>
-        ${flippedTime ? `• Flipped: ${flippedTime}<br>` : ''}
-        • Provider confidence: ${this.finalCall.confidence}<br>
-        • Persist: YES (reload safe)
+      <div style="font-weight:1100;">FINAL LOCK: <span class="muted">Waiting…</span></div>
+      <div style="margin-top:6px;font-weight:900;font-size:11px;text-align:left;">
+        • Locks at T-8..T-7<br>
+        • Time left: ${TimeUtils.formatCountdown(timeLeft)}
       </div>
     `;
   }
 
   async fetchData(){
     const now = TimeUtils.getNowET();
-
-    // always update last seen
     this.updateLastSeen();
 
-    // 1) sync boundary (do NOT rollover/reset)
     const sync = this.windowManager.syncWindow(now);
     const boundary = sync.boundary;
     const boundaryChanged = sync.rolled;
 
     try{
-      // 2) fetch price first (so we can close old window if needed)
       const {referencePrice, providerData, confidence} = await this.aggregator.fetchAllPrices();
       this.renderProviderTable(providerData, referencePrice, confidence);
 
@@ -1276,28 +1366,25 @@ class App {
         return;
       }
 
-      // 3) if boundary changed, close previous window using this price, then rollover
+      // close old window first, then rollover
       if (boundaryChanged){
         const oldWin = this.windowManager.currentWindow;
-
         if (now >= oldWin.end){
           if (!this.windowManager.exitPrice){
             this.windowManager.setExitPrice(referencePrice);
           }
           this.windowManager.tryFinalizeIfReady();
         }
-
-        // rollover to the new boundary
         this.windowManager.rolloverTo(boundary);
         this.clearFinalCall();
       }
 
-      // keep finalCall only if same window
-      if (this.finalCall && this.finalCall.windowEndMs !== this.windowManager.currentWindow.end.getTime()){
+      // keep final call only if same window
+      const win = this.windowManager.currentWindow;
+      if (this.finalCall && this.finalCall.windowEndMs !== win.end.getTime()){
         this.clearFinalCall();
       }
 
-      // ===== candles =====
       const lookbackMs = 90*60*1000;
       const startTime = now.getTime() - lookbackMs;
       const endTime = now.getTime();
@@ -1306,7 +1393,6 @@ class App {
       if (!candles || candles.length === 0){
         document.getElementById('predictionWarning').innerHTML =
           '<div class="warning">⚠️ Waiting for historical data (candles)...</div>';
-
         this.priceHistory = [{timestamp: now.getTime(), close: referencePrice}];
         this.chartRenderer.render(this.priceHistory);
         this.renderFinalCall();
@@ -1317,21 +1403,18 @@ class App {
       this.priceHistory = candles;
       document.getElementById('predictionWarning').innerHTML = '';
 
-      const win = this.windowManager.currentWindow;
-
       // entry lock
       if (now >= win.start && !this.windowManager.entryPrice){
         const entryCandle = candles.find(c => c.timestamp >= win.start.getTime());
         this.windowManager.setEntryPrice(entryCandle ? entryCandle.close : candles[candles.length-1].close);
       }
 
-      // prediction
       let prediction = this.predictor.predict(this.priceHistory);
       this.maybeLockFinalCall(prediction, confidence);
       prediction = this.applyFinalCallFlipRules(prediction);
       this.windowManager.setPrediction(prediction);
 
-      // close guard: if window ended but boundary not changed yet (rare)
+      // close guard
       if (now >= win.end){
         if (!this.windowManager.exitPrice){
           this.windowManager.setExitPrice(referencePrice);
@@ -1342,15 +1425,16 @@ class App {
       this.renderPrediction(prediction, confidence);
       this.renderFinalCall();
       this.chartRenderer.render(this.priceHistory);
+
       this.updateStats();
       this.renderHistory();
+      this.showSessionBanner({ backfilled: 0 }); // keep banner updated counts
 
-      // persist runtime state so reload continues
       this.saveRuntimeState();
-
     } catch (err){
       DebugLogger.add(`Fetch error: ${err.message}`, 'error');
       document.getElementById('predictionWarning').innerHTML = `<div class="warning">⚠️ Error: ${err.message}</div>`;
+      this.renderFinalCall();
       this.saveRuntimeState();
     }
   }
@@ -1400,7 +1484,7 @@ class App {
     box.style.display = 'inline-block';
     box.innerHTML = `
       <div style="font-weight:1000;">Suggestion: ${sug.action} • ${sug.strength}</div>
-      <div style="margin-top:6px;font-weight:800;font-size:11px;line-height:1.35;text-align:left;">
+      <div style="margin-top:6px;font-weight:900;font-size:11px;line-height:1.35;text-align:left;">
         ${sug.notes.map(n => `• ${n}`).join('<br>')}
       </div>
     `;
@@ -1408,14 +1492,18 @@ class App {
 
   updateStats(){
     const history = this.storage.load();
-    const total = history.length;
+    const missed = history.filter(w => w.predictedDirection === 'MISSED').length;
+    const predicted = history.length - missed;
+
     const correct = history.filter(w => w.correct === true).length;
     const denom = history.filter(w => w.correct !== null).length;
     const accuracy = denom > 0 ? ((correct/denom)*100).toFixed(1) : '0.0';
 
-    document.getElementById('totalWindows').textContent = total;
+    document.getElementById('totalWindows').textContent = history.length;
     document.getElementById('correctCount').textContent = correct;
     document.getElementById('accuracy').textContent = accuracy + '%';
+    document.getElementById('predictedCount').textContent = predicted;
+    document.getElementById('missedCount').textContent = missed;
   }
 
   renderHistory(){
@@ -1435,7 +1523,7 @@ class App {
 
       let correctMark = '<span class="correct-mark pending">?</span>';
       if (w.correct === null){
-        correctMark = '<span class="correct-mark pending">~</span>'; // missed/backfill
+        correctMark = '<span class="correct-mark pending">~</span>';
       } else if (w.correct === true){
         correctMark = '<span class="correct-mark yes">✓</span>';
       } else if (w.correct === false){
@@ -1480,6 +1568,7 @@ class App {
         if (!arr) throw new Error('Invalid history format');
         this.storage.import(arr);
         this.renderHistory();
+        this.showSessionBanner({ backfilled: 0 });
         alert('History imported successfully!');
       } catch (err){
         alert('Failed to import history: ' + err.message);
@@ -1494,10 +1583,15 @@ class App {
       this.clearRuntimeState();
       this.clearFinalCall();
       this.renderHistory();
+      this.showSessionBanner({ backfilled: 0 });
     }
   }
 
   sortHistory(){ this.renderHistory(); }
+
+  clearRuntimeState(){
+    try{ localStorage.removeItem(this.STATE_KEY()); } catch {}
+  }
 }
 
 let app;
