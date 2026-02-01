@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>BTC 15-Min Outcome Guesser (ET) </title>
+  <title>BTC 15-Min Outcome Guesser (ET)</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{
@@ -30,7 +30,7 @@
     .prediction-direction.UP{color:#51cf66}
     .prediction-direction.DOWN{color:#ff6b6b}
     .prediction-direction.FLAT{color:#ffd93d}
-    .prediction-probability{font-size:24px;color:#888;margin-bottom:20px}
+    .prediction-probability{font-size:24px;color:#888;margin-bottom:10px}
     .prediction-why{text-align:left;background:#0f1729;padding:15px;border-radius:6px;margin-top:15px}
     .prediction-why ul{list-style:none;padding-left:0}
     .prediction-why li{padding:5px 0;font-size:13px;color:#bbb}
@@ -72,7 +72,7 @@
 
     .warning{background:#ff922b;color:#000;padding:10px;border-radius:6px;margin-bottom:15px;font-size:13px;font-weight:800}
     .confidence-warning{
-      background:#ffd93d;color:#000;padding:5px 10px;border-radius:4px;display:inline-block;font-size:11px;font-weight:800;margin-top:10px
+      background:#ffd93d;color:#000;padding:8px 12px;border-radius:6px;display:inline-block;font-size:11px;font-weight:900;margin-top:10px
     }
 
     .stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:15px}
@@ -89,7 +89,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>⚡ BTC 15-Min Outcome Guesser (ET) </h1>
+    <h1>⚡ BTC 15-Min Outcome Guesser (ET)</h1>
 
     <div id="debugInfo" class="debug-info"></div>
 
@@ -136,6 +136,10 @@
         <div class="prediction-display">
           <div class="prediction-direction" id="predictionDirection">LOADING...</div>
           <div class="prediction-probability" id="predictionProbability">---%</div>
+
+          <!-- ✅ Strong suggestion box -->
+          <div id="tradeSuggestion" class="confidence-warning" style="display:none;"></div>
+
           <div class="prediction-why" id="predictionWhy">
             <strong>Why:</strong>
             <ul id="predictionReasons"></ul>
@@ -252,7 +256,6 @@ const TimeUtils = {
     return {start:startDate, end:endDate};
   },
 
-  // Keep your original parsing approach (works without libs)
   parseETString(etString){
     const m = etString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
     if (!m) return new Date(etString);
@@ -283,13 +286,12 @@ const TimeUtils = {
 
 /* =========================
    PROVIDERS + RATE LIMIT
-   FIX: rate limit per endpoint
 ========================= */
 class BaseProvider {
   constructor(name){
     this.name = name;
     this.minInterval = 3000;
-    this.lastFetchByKey = new Map();   // ✅ per-endpoint limiter
+    this.lastFetchByKey = new Map();
     this.errorCount = 0;
     this.maxErrors = 5;
   }
@@ -320,7 +322,6 @@ class BaseProvider {
       });
 
       if (!response.ok){
-        // CoinGecko often returns 429; treat it as error but don’t "kill" provider too fast
         const msg = `HTTP ${response.status}`;
         throw new Error(msg);
       }
@@ -331,7 +332,6 @@ class BaseProvider {
       DebugLogger.add(`${this.name}(${key}) ok (${latency}ms)`);
       return {data, latency};
     } catch (err){
-      // Don’t permanently ban on CoinGecko 429 too quickly (still counts, but you can tweak)
       this.errorCount++;
       DebugLogger.add(`${this.name}(${key}) error: ${err.message}`, 'error');
       throw err;
@@ -342,7 +342,7 @@ class BaseProvider {
 class BinanceProvider extends BaseProvider {
   constructor(){
     super('Binance');
-    this.minInterval = 1200; // Binance is usually fine; keep it responsive
+    this.minInterval = 1200;
   }
 
   async getCurrentPrice(){
@@ -354,8 +354,8 @@ class BinanceProvider extends BaseProvider {
 
   async getCandles(startTime, endTime){
     if (this.shouldSkip()) throw new Error('Max errors reached');
-    const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=100`;
-    const {data, latency} = await this.fetchWithRateLimit(url, { rateKey:'candles' });
+    const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=1000`;
+    const {data} = await this.fetchWithRateLimit(url, { rateKey:'candles' });
 
     const candles = data.map(c => ({
       timestamp: c[0],
@@ -365,10 +365,9 @@ class BinanceProvider extends BaseProvider {
       close: parseFloat(c[4]),
       volume: parseFloat(c[5]),
     }));
-    return {candles, latency};
+    return {candles};
   }
 }
-
 
 class CoinbaseProvider extends BaseProvider {
   constructor() {
@@ -378,13 +377,11 @@ class CoinbaseProvider extends BaseProvider {
 
   async getCurrentPrice() {
     if (this.shouldSkip()) throw new Error('Max errors reached');
-
     const url = 'https://api.coinbase.com/v2/prices/BTC-USD/spot';
     const { data, latency } = await this.fetchWithRateLimit(url, { rateKey: 'price' });
 
     const price = parseFloat(data?.data?.amount);
     if (!Number.isFinite(price)) throw new Error('Bad price data');
-
     return { price, latency };
   }
 }
@@ -392,7 +389,7 @@ class CoinbaseProvider extends BaseProvider {
 class CoinGeckoProvider extends BaseProvider {
   constructor(){
     super('CoinGecko');
-    this.minInterval = 15000; // ✅ reduce spam; CG free tier hates fast polling
+    this.minInterval = 15000;
   }
 
   async getCurrentPrice(){
@@ -404,7 +401,7 @@ class CoinGeckoProvider extends BaseProvider {
 }
 
 /* =========================
-   AGGREGATOR (REMOVED CRYPTOCOMPARE)
+   AGGREGATOR
 ========================= */
 class PriceAggregator {
   constructor(){
@@ -439,7 +436,7 @@ class PriceAggregator {
           price: null,
           latency: null,
           status: 'error',
-          error: result.status === 'rejected' ? result.reason?.message : 'Bad data'
+          error: result.status === 'rejected' ? (result.reason?.message || 'Error') : 'Bad data'
         });
       }
     });
@@ -490,7 +487,6 @@ class PriceAggregator {
       this.lastCandlesAt = Date.now();
       return res.candles;
     } catch (err){
-      // If rate-limited or temporary issue, fall back to last candles if fresh
       const ageMs = Date.now() - this.lastCandlesAt;
       if (this.lastCandles.length > 0 && ageMs < 120000){
         DebugLogger.add(`Candle fetch failed (${err.message}) -> using cached candles`);
@@ -619,6 +615,7 @@ class PredictionEngine {
 
 /* =========================
    WINDOW MANAGER
+   FIX: record window only when we have price (in fetchData)
 ========================= */
 class WindowManager {
   constructor(){
@@ -631,18 +628,24 @@ class WindowManager {
   update(now){
     const boundaries = TimeUtils.get15MinWindowBoundaries(now);
 
-    if (!this.currentWindow || boundaries.start.getTime() !== this.currentWindow.start.getTime()){
-      if (this.currentWindow && now >= this.currentWindow.end){
+    if (!this.currentWindow){
+      this.currentWindow = boundaries;
+      return this.currentWindow;
+    }
+
+    // If window rolled over
+    if (boundaries.start.getTime() !== this.currentWindow.start.getTime()){
+      // ✅ finalize previous window if possible BEFORE resetting
+      if (this.entryPrice && this.exitPrice && this.prediction){
         this.finalizeWindow();
+      } else {
+        DebugLogger.add('Window rolled over but missing entry/exit/prediction -> not saved', 'error');
       }
+
       this.currentWindow = boundaries;
       this.entryPrice = null;
       this.exitPrice = null;
       this.prediction = null;
-    }
-
-    if (now >= this.currentWindow.end && !this.exitPrice){
-      this.finalizeWindow();
     }
 
     return this.currentWindow;
@@ -656,12 +659,9 @@ class WindowManager {
   }
 
   setExitPrice(price){
-    if (!this.exitPrice && this.currentWindow){
-      const now = TimeUtils.getNowET();
-      if (now >= this.currentWindow.end && typeof price === 'number'){
-        this.exitPrice = price;
-        DebugLogger.add(`Exit locked: $${price.toFixed(2)}`);
-      }
+    if (!this.exitPrice && typeof price === 'number'){
+      this.exitPrice = price;
+      DebugLogger.add(`Exit locked: $${price.toFixed(2)}`);
     }
   }
 
@@ -691,6 +691,11 @@ class WindowManager {
     });
 
     DebugLogger.add(`Window finalized: ${correct?'✓':'✗'} Pred ${this.prediction.direction} | Actual ${actualDirection}`);
+
+    // ✅ instant UI refresh
+    if (window.app && typeof window.app.renderHistory === 'function'){
+      window.app.renderHistory();
+    }
   }
 
   getTimeUntilEnd(){
@@ -775,7 +780,6 @@ class ChartRenderer {
     const chartW = width - padding.left - padding.right;
     const chartH = height - padding.top - padding.bottom;
 
-    // grid + labels
     ctx.strokeStyle = '#2a3f5f';
     ctx.lineWidth = 1;
     for (let i=0;i<=4;i++){
@@ -792,7 +796,6 @@ class ChartRenderer {
       ctx.fillText(price.toFixed(0), width - padding.right + 5, y + 4);
     }
 
-    // line
     ctx.strokeStyle = '#4a9eff';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -804,7 +807,6 @@ class ChartRenderer {
     });
     ctx.stroke();
 
-    // last point
     const last = priceHistory[priceHistory.length-1]?.close;
     const y = padding.top + chartH - ((last - minPrice)/range)*chartH;
     ctx.fillStyle = '#51cf66';
@@ -826,7 +828,7 @@ class App {
     this.chartRenderer = new ChartRenderer(document.getElementById('priceChart'));
 
     this.priceHistory = [];
-    this.fetchInterval = 12000; // ✅ 12s (more friendly, still realtime)
+    this.fetchInterval = 12000;
 
     this.init();
   }
@@ -842,21 +844,69 @@ class App {
     this.renderHistory();
   }
 
+  // ✅ display-only (no windowManager.update here)
   updateTime(){
     const now = TimeUtils.getNowET();
     document.getElementById('currentTime').textContent = TimeUtils.formatET(now, 'time');
 
-    const win = this.windowManager.update(now);
-    if (win){
-      document.getElementById('windowStart').textContent = TimeUtils.formatET(win.start, 'time');
-      document.getElementById('windowEnd').textContent = TimeUtils.formatET(win.end, 'time');
-      document.getElementById('countdown').textContent = TimeUtils.formatCountdown(this.windowManager.getTimeUntilEnd());
+    const boundaries = TimeUtils.get15MinWindowBoundaries(now);
+    document.getElementById('windowStart').textContent = TimeUtils.formatET(boundaries.start, 'time');
+    document.getElementById('windowEnd').textContent = TimeUtils.formatET(boundaries.end, 'time');
+
+    const diff = Math.max(0, Math.floor((boundaries.end - now) / 1000));
+    document.getElementById('countdown').textContent = TimeUtils.formatCountdown(diff);
+  }
+
+  getTradeSuggestion(prediction, providerConfidence){
+    const timeLeft = this.windowManager.getTimeUntilEnd();
+    const ind = prediction.indicators || {};
+
+    let conviction = (prediction.probability - 50) * 2; // 0..90
+
+    if (providerConfidence === 'LOW') conviction -= 12;
+    if (providerConfidence === 'NO_DATA') conviction -= 30;
+
+    const vol = (ind.volatility ?? 0);
+    if (vol > 0.0015) conviction -= 8;
+    if (vol > 0.0030) conviction -= 15;
+
+    const m3 = ind.momentum3 ?? 0;
+    const m10 = ind.momentum10 ?? 0;
+    const aligned = (m3 >= 0 && m10 >= 0) || (m3 < 0 && m10 < 0);
+    if (aligned) conviction += 6;
+    else conviction -= 6;
+
+    const inLast2Min = timeLeft <= 120;
+    if (inLast2Min && prediction.probability >= 72 && aligned) conviction += 6;
+
+    conviction = Math.max(0, Math.min(100, Math.round(conviction)));
+
+    let action = 'NO TRADE';
+    if (providerConfidence !== 'NO_DATA'){
+      if (prediction.direction === 'UP' && prediction.probability >= 65) action = 'LONG';
+      if (prediction.direction === 'DOWN' && prediction.probability >= 65) action = 'SHORT';
     }
+
+    let strength = 'WEAK';
+    if (conviction >= 70) strength = 'STRONG';
+    else if (conviction >= 55) strength = 'MEDIUM';
+
+    const notes = [];
+    notes.push(`Conviction: ${conviction}/100 (${strength})`);
+    notes.push(`Time left: ${TimeUtils.formatCountdown(timeLeft)}`);
+    notes.push(`Provider confidence: ${providerConfidence}`);
+    if (vol) notes.push(`Volatility: ${(vol*100).toFixed(3)}%`);
+    notes.push(`Momentum alignment: ${aligned ? 'YES' : 'NO'}`);
+    if (inLast2Min && prediction.probability < 65) notes.push('Late window: signal not strong enough');
+
+    return { action, conviction, strength, notes };
   }
 
   async fetchData(){
     const now = TimeUtils.getNowET();
-    const win = this.windowManager.currentWindow;
+
+    // ✅ update window state only when fetching (so finalize has data)
+    const win = this.windowManager.update(now);
     if (!win) return;
 
     try{
@@ -867,6 +917,7 @@ class App {
         document.getElementById('predictionDirection').textContent = 'NO DATA';
         document.getElementById('predictionProbability').textContent = '---%';
         document.getElementById('predictionReasons').innerHTML = '<li>No providers available</li>';
+        document.getElementById('tradeSuggestion').style.display = 'none';
         return;
       }
 
@@ -881,7 +932,6 @@ class App {
         document.getElementById('predictionWarning').innerHTML =
           '<div class="warning">⚠️ Waiting for historical data (candles)...</div>';
 
-        // fallback minimal history so UI doesn't break
         this.priceHistory = [{timestamp: now.getTime(), close: referencePrice}];
         this.chartRenderer.render(this.priceHistory);
         return;
@@ -890,23 +940,29 @@ class App {
       this.priceHistory = candles;
       document.getElementById('predictionWarning').innerHTML = '';
 
-      // entry price lock (use first candle at/after window start if possible)
+      // entry lock once window started
       if (now >= win.start && !this.windowManager.entryPrice){
         const entryCandle = candles.find(c => c.timestamp >= win.start.getTime());
         this.windowManager.setEntryPrice(entryCandle ? entryCandle.close : candles[candles.length-1].close);
       }
 
-      // exit price lock when window ends
-      if (now >= win.end && !this.windowManager.exitPrice){
-        this.windowManager.setExitPrice(referencePrice);
-      }
-
+      // prediction
       const prediction = this.predictor.predict(this.priceHistory);
       this.windowManager.setPrediction(prediction);
+
+      // ✅ lock exit as soon as window ended (even if "late")
+      if (now >= win.end && !this.windowManager.exitPrice){
+        this.windowManager.setExitPrice(referencePrice);
+        // finalize immediately if everything ready
+        if (this.windowManager.entryPrice && this.windowManager.prediction){
+          this.windowManager.finalizeWindow();
+        }
+      }
 
       this.renderPrediction(prediction, confidence);
       this.chartRenderer.render(this.priceHistory);
       this.updateStats();
+      this.renderHistory();
     } catch (err){
       DebugLogger.add(`Fetch error: ${err.message}`, 'error');
       document.getElementById('predictionWarning').innerHTML = `<div class="warning">⚠️ Error: ${err.message}</div>`;
@@ -934,7 +990,7 @@ class App {
     }
 
     if (referencePrice){
-      cdiv.innerHTML += `<div style="margin-top:10px;color:#51cf66;font-weight:800;">Reference Price: $${referencePrice.toFixed(2)}</div>`;
+      cdiv.innerHTML += `<div style="margin-top:10px;color:#51cf66;font-weight:900;">Reference Price: $${referencePrice.toFixed(2)}</div>`;
     }
   }
 
@@ -948,11 +1004,21 @@ class App {
     probEl.textContent = prediction.probability + '%';
     whyEl.innerHTML = prediction.reasons.map(r => `<li>${r}</li>`).join('');
 
-    // optional warning if low provider confidence
     if (confidence !== 'HIGH'){
       document.getElementById('predictionWarning').innerHTML =
         `<div class="warning">⚠️ Price confidence: ${confidence}. Prediction may be less reliable.</div>`;
     }
+
+    // ✅ Strong suggestion render
+    const box = document.getElementById('tradeSuggestion');
+    const sug = this.getTradeSuggestion(prediction, confidence);
+    box.style.display = 'inline-block';
+    box.innerHTML = `
+      <div style="font-weight:1000;">Suggestion: ${sug.action} • ${sug.strength}</div>
+      <div style="margin-top:6px;font-weight:800;font-size:11px;line-height:1.35;text-align:left;">
+        ${sug.notes.map(n => `• ${n}`).join('<br>')}
+      </div>
+    `;
   }
 
   updateStats(){
