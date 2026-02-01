@@ -137,9 +137,7 @@
           <div class="prediction-direction" id="predictionDirection">LOADING...</div>
           <div class="prediction-probability" id="predictionProbability">---%</div>
 
-          <!-- Strong suggestion -->
           <div id="tradeSuggestion" class="confidence-warning" style="display:none;"></div>
-          <!-- FINAL CALL (persisted across reload) -->
           <div id="finalCallBox" class="confidence-warning" style="display:none;"></div>
 
           <div class="prediction-why" id="predictionWhy">
@@ -368,6 +366,36 @@ class BinanceProvider extends BaseProvider {
     }));
     return {candles};
   }
+
+  // For backfill: get 1m candles for a range and map to 15m windows
+  async getCandlesForBackfill(startTime, endTime){
+    if (this.shouldSkip()) throw new Error('Max errors reached');
+
+    // Binance limit=1000 per request. We'll page.
+    const out = [];
+    let cursor = startTime;
+    const step = 1000 * 60 * 1000; // 1000 minutes
+    while (cursor < endTime){
+      const chunkEnd = Math.min(endTime, cursor + step);
+      const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${cursor}&endTime=${chunkEnd}&limit=1000`;
+      const {data} = await this.fetchWithRateLimit(url, { rateKey:'backfill' });
+      if (Array.isArray(data)){
+        data.forEach(c => out.push({
+          timestamp: c[0],
+          close: parseFloat(c[4]),
+        }));
+      }
+      // move cursor forward (avoid infinite loop)
+      if (data && data.length > 0){
+        cursor = data[data.length - 1][0] + 60*1000;
+      } else {
+        cursor = chunkEnd + 60*1000;
+      }
+      // gentle yield
+      await new Promise(r => setTimeout(r, 150));
+    }
+    return out;
+  }
 }
 
 class CoinbaseProvider extends BaseProvider {
@@ -411,7 +439,7 @@ class PriceAggregator {
       new CoinbaseProvider(),
       new CoinGeckoProvider(),
     ];
-    this.outlierThreshold = 0.0035; // 0.35%
+    this.outlierThreshold = 0.0035;
     this.lastCandles = [];
     this.lastCandlesAt = 0;
   }
@@ -497,6 +525,10 @@ class PriceAggregator {
       return [];
     }
   }
+
+  getBinance(){
+    return this.providers.find(p => p instanceof BinanceProvider) || null;
+  }
 }
 
 /* =========================
@@ -546,7 +578,6 @@ class Indicators {
 ========================= */
 class PredictionEngine {
   constructor(){
-    // more window-aware
     this.weights = {
       momentum3:  0.10,
       momentum5:  0.20,
@@ -622,8 +653,7 @@ class PredictionEngine {
 
 /* =========================
    WINDOW MANAGER
-   - Adds "hasSavedCurrentWindow" + tryFinalizeIfReady()
-   - Fixes "history not logged" edge cases
+   - No rollover reset before close
 ========================= */
 class WindowManager {
   constructor(){
@@ -634,33 +664,29 @@ class WindowManager {
     this.hasSavedCurrentWindow = false;
   }
 
-  update(now){
+  syncWindow(now){
     const boundaries = TimeUtils.get15MinWindowBoundaries(now);
 
     if (!this.currentWindow){
       this.currentWindow = boundaries;
-      this.hasSavedCurrentWindow = false;
-      return this.currentWindow;
+      this.resetWindowState();
+      return { boundary: boundaries, rolled: false };
     }
 
-    if (boundaries.start.getTime() !== this.currentWindow.start.getTime()){
-      // finalize previous if complete and not yet saved
-      this.tryFinalizeIfReady();
+    const changed = boundaries.start.getTime() !== this.currentWindow.start.getTime();
+    return { boundary: boundaries, rolled: changed };
+  }
 
-      // reset for new window
-      this.currentWindow = boundaries;
-      this.entryPrice = null;
-      this.exitPrice = null;
-      this.prediction = null;
-      this.hasSavedCurrentWindow = false;
+  rolloverTo(boundary){
+    this.currentWindow = boundary;
+    this.resetWindowState();
+  }
 
-      // clear app locks
-      if (window.app){
-        window.app.clearFinalCall();
-      }
-    }
-
-    return this.currentWindow;
+  resetWindowState(){
+    this.entryPrice = null;
+    this.exitPrice = null;
+    this.prediction = null;
+    this.hasSavedCurrentWindow = false;
   }
 
   setEntryPrice(price){
@@ -677,7 +703,9 @@ class WindowManager {
     }
   }
 
-  setPrediction(prediction){ this.prediction = prediction; }
+  setPrediction(prediction){
+    this.prediction = prediction;
+  }
 
   tryFinalizeIfReady(){
     if (!this.currentWindow) return false;
@@ -711,7 +739,6 @@ class WindowManager {
     });
 
     this.hasSavedCurrentWindow = true;
-
     DebugLogger.add(`Window finalized: ${correct?'✓':'✗'} Pred ${this.prediction.direction} | Actual ${actualDirection}`);
 
     if (window.app && typeof window.app.renderHistory === 'function'){
@@ -733,7 +760,7 @@ class WindowManager {
 class Storage {
   constructor(){
     this.SCHEMA_VERSION = 1;
-    this.MAX_WINDOWS = 500;
+    this.MAX_WINDOWS = 2000;   // increased
     this.KEY = 'btc_guesser_history';
   }
 
@@ -762,6 +789,11 @@ class Storage {
     const windows = this.load();
     windows.push(window);
     this.save(windows);
+  }
+
+  hasWindowEnd(windowEndMs){
+    const windows = this.load();
+    return windows.some(w => w.windowEndET === windowEndMs);
   }
 
   clear(){ localStorage.removeItem(this.KEY); }
@@ -839,8 +871,8 @@ class ChartRenderer {
 
 /* =========================
    MAIN APP
-   - FINAL CALL persists across reload
-   - History always logs when ready
+   - Persist runtime state + final call across reload
+   - Backfill missed windows (actual-only) when reopened
 ========================= */
 class App {
   constructor(){
@@ -853,15 +885,16 @@ class App {
     this.priceHistory = [];
     this.fetchInterval = 12000;
 
-    // locks / flip logic
-    this.finalCall = null;       // persisted
-    this.flipCandidate = null;   // 2-step confirmation tracker
+    this.finalCall = null;
+    this.flipCandidate = null;
 
     this.init();
   }
 
-  /* ===== FINAL CALL persistence ===== */
+  // ===== persistence keys =====
   FINAL_KEY(){ return 'btc_guesser_final_call_v1'; }
+  STATE_KEY(){ return 'btc_guesser_runtime_state_v1'; }
+  LAST_SEEN_KEY(){ return 'btc_guesser_last_seen_ms_v1'; }
 
   saveFinalCall(){
     try{
@@ -891,13 +924,80 @@ class App {
     try{ localStorage.removeItem(this.FINAL_KEY()); } catch {}
   }
 
+  // runtime state: current window + entry/exit/prediction snapshot
+  saveRuntimeState(){
+    try{
+      const wm = this.windowManager;
+      const payload = {
+        savedAt: Date.now(),
+        window: wm.currentWindow ? { start: wm.currentWindow.start.getTime(), end: wm.currentWindow.end.getTime() } : null,
+        entryPrice: wm.entryPrice,
+        exitPrice: wm.exitPrice,
+        hasSavedCurrentWindow: wm.hasSavedCurrentWindow,
+        prediction: wm.prediction ? {
+          direction: wm.prediction.direction,
+          probability: wm.prediction.probability,
+          indicators: wm.prediction.indicators || {}
+        } : null,
+      };
+      localStorage.setItem(this.STATE_KEY(), JSON.stringify(payload));
+    } catch {}
+  }
+
+  loadRuntimeState(){
+    try{
+      const raw = localStorage.getItem(this.STATE_KEY());
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed || null;
+    } catch {
+      return null;
+    }
+  }
+
+  clearRuntimeState(){
+    try{ localStorage.removeItem(this.STATE_KEY()); } catch {}
+  }
+
+  updateLastSeen(){
+    try{ localStorage.setItem(this.LAST_SEEN_KEY(), String(Date.now())); } catch {}
+  }
+
+  getLastSeen(){
+    try{
+      const v = localStorage.getItem(this.LAST_SEEN_KEY());
+      return v ? parseInt(v,10) : null;
+    } catch { return null; }
+  }
+
   async init(){
     DebugLogger.add('App initializing...');
     this.updateTime();
     setInterval(()=>this.updateTime(), 1000);
 
-    // restore persisted final call
+    // restore persisted data
     this.finalCall = this.loadFinalCall();
+
+    const state = this.loadRuntimeState();
+    if (state && state.window){
+      // restore window boundary object
+      this.windowManager.currentWindow = { start: new Date(state.window.start), end: new Date(state.window.end) };
+      this.windowManager.entryPrice = state.entryPrice ?? null;
+      this.windowManager.exitPrice = state.exitPrice ?? null;
+      this.windowManager.hasSavedCurrentWindow = !!state.hasSavedCurrentWindow;
+      if (state.prediction){
+        this.windowManager.prediction = {
+          direction: state.prediction.direction,
+          probability: state.prediction.probability,
+          reasons: [], // will be refreshed on fetch
+          indicators: state.prediction.indicators || {}
+        };
+      }
+      DebugLogger.add('Runtime state restored (window/entry/prediction)');
+    }
+
+    // backfill missed windows since last seen (actual-only)
+    await this.backfillMissedWindows();
 
     await this.fetchData();
     setInterval(()=>this.fetchData(), this.fetchInterval);
@@ -905,7 +1005,7 @@ class App {
     this.renderHistory();
   }
 
-  // display-only (no window mutation)
+  // display-only
   updateTime(){
     const now = TimeUtils.getNowET();
     document.getElementById('currentTime').textContent = TimeUtils.formatET(now, 'time');
@@ -918,12 +1018,100 @@ class App {
     document.getElementById('countdown').textContent = TimeUtils.formatCountdown(diff);
   }
 
-  // Strong suggestion (conviction)
+  // ✅ backfill missed windows using Binance candles
+  async backfillMissedWindows(){
+    const lastSeen = this.getLastSeen();
+    this.updateLastSeen();
+
+    if (!lastSeen) return;
+
+    const now = Date.now();
+    // if gap < 2 minutes, skip
+    if (now - lastSeen < 2 * 60 * 1000) return;
+
+    // cap backfill window to 24h to avoid huge loops
+    const start = Math.max(lastSeen - 2*60*1000, now - 24*60*60*1000);
+    const end = now;
+
+    DebugLogger.add(`Backfill check: gap ${(now-lastSeen)/1000|0}s`);
+
+    const binance = this.aggregator.getBinance();
+    if (!binance) return;
+
+    try{
+      const candles = await binance.getCandlesForBackfill(start, end);
+      if (!candles || candles.length < 5) return;
+
+      // Map 1m candles into 15m windows: entry = first candle >= window start, exit = last candle < window end
+      // We'll iterate through window boundaries between start..end
+      let cursor = TimeUtils.get15MinWindowBoundaries(new Date(start)).start.getTime();
+      const endBoundary = TimeUtils.get15MinWindowBoundaries(new Date(end)).end.getTime();
+
+      const byTs = candles; // already sorted by time from API
+      const findEntry = (ws) => byTs.find(c => c.timestamp >= ws)?.close ?? null;
+      const findExit  = (we) => {
+        // last candle before window end
+        for (let i = byTs.length - 1; i >= 0; i--){
+          if (byTs[i].timestamp < we) return byTs[i].close;
+        }
+        return null;
+      };
+
+      let added = 0;
+      while (cursor < endBoundary){
+        const ws = cursor;
+        const we = ws + 15*60*1000;
+
+        // Only backfill windows that fully ended before now (avoid current live window)
+        if (we > now) break;
+
+        // Skip if already exists in history
+        if (!this.storage.hasWindowEnd(we)){
+          const entry = findEntry(ws);
+          const exit = findExit(we);
+
+          if (typeof entry === 'number' && typeof exit === 'number'){
+            let actualDirection = 'FLAT';
+            if (exit > entry) actualDirection = 'UP';
+            else if (exit < entry) actualDirection = 'DOWN';
+
+            // Mark prediction as MISSED
+            this.storage.addWindow({
+              windowStartET: ws,
+              windowEndET: we,
+              entryPrice: entry,
+              exitPrice: exit,
+              predictedDirection: 'MISSED',
+              predictedProbability: 0,
+              actualDirection,
+              correct: null,
+              timestampCreated: now,
+              timestampClosed: now,
+              indicators: {}
+            });
+            added++;
+          }
+        }
+
+        cursor = we;
+      }
+
+      if (added > 0){
+        DebugLogger.add(`Backfill added: ${added} windows`);
+        this.renderHistory();
+        this.updateStats();
+      }
+    } catch (e){
+      DebugLogger.add(`Backfill failed: ${e.message}`, 'error');
+    }
+  }
+
+  // ✅ your requested action threshold (>= 40)
   getTradeSuggestion(prediction, providerConfidence){
     const timeLeft = this.windowManager.getTimeUntilEnd();
     const ind = prediction.indicators || {};
 
-    let conviction = (prediction.probability - 50) * 2; // 0..90
+    let conviction = (prediction.probability - 50) * 2;
 
     if (providerConfidence === 'LOW') conviction -= 12;
     if (providerConfidence === 'NO_DATA') conviction -= 30;
@@ -938,16 +1126,15 @@ class App {
     if (aligned) conviction += 6;
     else conviction -= 6;
 
-    const inLast2Min = timeLeft <= 120;
-    if (inLast2Min && prediction.probability >= 72 && aligned) conviction += 6;
-
     conviction = Math.max(0, Math.min(100, Math.round(conviction)));
 
+    // ✅ CHANGED AS YOU ASKED
     let action = 'NO TRADE';
     if (providerConfidence !== 'NO_DATA'){
       if (prediction.direction === 'UP' && prediction.probability >= 40) action = 'LONG';
       if (prediction.direction === 'DOWN' && prediction.probability >= 40) action = 'SHORT';
     }
+
     let strength = 'WEAK';
     if (conviction >= 70) strength = 'STRONG';
     else if (conviction >= 55) strength = 'MEDIUM';
@@ -958,17 +1145,16 @@ class App {
     notes.push(`Provider confidence: ${providerConfidence}`);
     if (vol) notes.push(`Volatility: ${(vol*100).toFixed(3)}%`);
     notes.push(`Momentum alignment (5m & 12m): ${aligned ? 'YES' : 'NO'}`);
-    if (inLast2Min && prediction.probability < 65) notes.push('Late window: signal not strong enough');
 
     return { action, conviction, strength, notes };
   }
 
-  // Lock FINAL CALL around T-8..T-7
+  // FINAL lock around T-8..T-7
   maybeLockFinalCall(prediction, confidence){
     const win = this.windowManager.currentWindow;
     if (!win) return;
 
-    const timeLeft = this.windowManager.getTimeUntilEnd(); // seconds
+    const timeLeft = this.windowManager.getTimeUntilEnd();
     const LOCK_FROM = 8 * 60;
     const LOCK_TO   = 7 * 60;
 
@@ -989,7 +1175,7 @@ class App {
     }
   }
 
-  // Flip after final lock only with major change + 2-step confirm
+  // Flip with major change + 2-step confirm
   applyFinalCallFlipRules(livePrediction){
     const win = this.windowManager.currentWindow;
     if (!win || !this.finalCall || this.finalCall.windowEndMs !== win.end.getTime()){
@@ -1002,7 +1188,6 @@ class App {
     if (livePrediction.direction === baseDir){
       this.flipCandidate = null;
       const bumped = Math.max(baseProb, Math.min(95, livePrediction.probability));
-      // keep base dir; allow prob bump
       this.finalCall.prob = bumped;
       this.saveFinalCall();
       return { ...livePrediction, direction: baseDir, probability: bumped };
@@ -1058,9 +1243,9 @@ class App {
       <div style="font-weight:1000;">FINAL CALL: ${this.finalCall.dir} • ${this.finalCall.prob}%</div>
       <div style="margin-top:6px;font-weight:800;font-size:11px;line-height:1.35;text-align:left;">
         • Locked: ${lockedTime} (T-8..T-7)<br>
-        ${flippedTime ? `• Flipped: ${flippedTime} (major + 2-step)<br>` : ''}
+        ${flippedTime ? `• Flipped: ${flippedTime}<br>` : ''}
         • Provider confidence: ${this.finalCall.confidence}<br>
-        • Persist: YES (survives reload)
+        • Persist: YES (reload safe)
       </div>
     `;
   }
@@ -1068,16 +1253,16 @@ class App {
   async fetchData(){
     const now = TimeUtils.getNowET();
 
-    // Update window state only on fetch (so finalize has data)
-    const win = this.windowManager.update(now);
-    if (!win) return;
+    // always update last seen
+    this.updateLastSeen();
 
-    // If we restored a finalCall from reload but it's for a different window, clear it
-    if (this.finalCall && this.finalCall.windowEndMs !== win.end.getTime()){
-      this.clearFinalCall();
-    }
+    // 1) sync boundary (do NOT rollover/reset)
+    const sync = this.windowManager.syncWindow(now);
+    const boundary = sync.boundary;
+    const boundaryChanged = sync.rolled;
 
     try{
+      // 2) fetch price first (so we can close old window if needed)
       const {referencePrice, providerData, confidence} = await this.aggregator.fetchAllPrices();
       this.renderProviderTable(providerData, referencePrice, confidence);
 
@@ -1087,13 +1272,35 @@ class App {
         document.getElementById('predictionReasons').innerHTML = '<li>No providers available</li>';
         document.getElementById('tradeSuggestion').style.display = 'none';
         this.renderFinalCall();
+        this.saveRuntimeState();
         return;
       }
 
+      // 3) if boundary changed, close previous window using this price, then rollover
+      if (boundaryChanged){
+        const oldWin = this.windowManager.currentWindow;
+
+        if (now >= oldWin.end){
+          if (!this.windowManager.exitPrice){
+            this.windowManager.setExitPrice(referencePrice);
+          }
+          this.windowManager.tryFinalizeIfReady();
+        }
+
+        // rollover to the new boundary
+        this.windowManager.rolloverTo(boundary);
+        this.clearFinalCall();
+      }
+
+      // keep finalCall only if same window
+      if (this.finalCall && this.finalCall.windowEndMs !== this.windowManager.currentWindow.end.getTime()){
+        this.clearFinalCall();
+      }
+
+      // ===== candles =====
       const lookbackMs = 90*60*1000;
       const startTime = now.getTime() - lookbackMs;
       const endTime = now.getTime();
-
       const candles = await this.aggregator.fetchCandles(startTime, endTime);
 
       if (!candles || candles.length === 0){
@@ -1103,13 +1310,16 @@ class App {
         this.priceHistory = [{timestamp: now.getTime(), close: referencePrice}];
         this.chartRenderer.render(this.priceHistory);
         this.renderFinalCall();
+        this.saveRuntimeState();
         return;
       }
 
       this.priceHistory = candles;
       document.getElementById('predictionWarning').innerHTML = '';
 
-      // entry lock once window started
+      const win = this.windowManager.currentWindow;
+
+      // entry lock
       if (now >= win.start && !this.windowManager.entryPrice){
         const entryCandle = candles.find(c => c.timestamp >= win.start.getTime());
         this.windowManager.setEntryPrice(entryCandle ? entryCandle.close : candles[candles.length-1].close);
@@ -1117,16 +1327,11 @@ class App {
 
       // prediction
       let prediction = this.predictor.predict(this.priceHistory);
-
-      // lock final call around T-8..T-7
       this.maybeLockFinalCall(prediction, confidence);
-
-      // apply flip rules if final call exists
       prediction = this.applyFinalCallFlipRules(prediction);
-
       this.windowManager.setPrediction(prediction);
 
-      // close guard: always try finalize after window ends
+      // close guard: if window ended but boundary not changed yet (rare)
       if (now >= win.end){
         if (!this.windowManager.exitPrice){
           this.windowManager.setExitPrice(referencePrice);
@@ -1139,9 +1344,14 @@ class App {
       this.chartRenderer.render(this.priceHistory);
       this.updateStats();
       this.renderHistory();
+
+      // persist runtime state so reload continues
+      this.saveRuntimeState();
+
     } catch (err){
       DebugLogger.add(`Fetch error: ${err.message}`, 'error');
       document.getElementById('predictionWarning').innerHTML = `<div class="warning">⚠️ Error: ${err.message}</div>`;
+      this.saveRuntimeState();
     }
   }
 
@@ -1199,8 +1409,9 @@ class App {
   updateStats(){
     const history = this.storage.load();
     const total = history.length;
-    const correct = history.filter(w => w.correct).length;
-    const accuracy = total > 0 ? ((correct/total)*100).toFixed(1) : '0.0';
+    const correct = history.filter(w => w.correct === true).length;
+    const denom = history.filter(w => w.correct !== null).length;
+    const accuracy = denom > 0 ? ((correct/denom)*100).toFixed(1) : '0.0';
 
     document.getElementById('totalWindows').textContent = total;
     document.getElementById('correctCount').textContent = correct;
@@ -1217,23 +1428,25 @@ class App {
       return;
     }
 
-    const sorted = [...history].sort((a,b)=>b.timestampCreated - a.timestampCreated);
+    const sorted = [...history].sort((a,b)=>b.windowEndET - a.windowEndET);
     tbody.innerHTML = sorted.map(w => {
       const startTime = TimeUtils.formatET(new Date(w.windowStartET), 'time');
       const endTime = TimeUtils.formatET(new Date(w.windowEndET), 'time');
 
       let correctMark = '<span class="correct-mark pending">?</span>';
-      if (w.actualDirection){
-        correctMark = w.correct
-          ? '<span class="correct-mark yes">✓</span>'
-          : '<span class="correct-mark no">✗</span>';
+      if (w.correct === null){
+        correctMark = '<span class="correct-mark pending">~</span>'; // missed/backfill
+      } else if (w.correct === true){
+        correctMark = '<span class="correct-mark yes">✓</span>';
+      } else if (w.correct === false){
+        correctMark = '<span class="correct-mark no">✗</span>';
       }
 
       return `
         <tr>
-          <td>${new Date(w.timestampCreated).toLocaleString()}</td>
+          <td>${new Date(w.timestampClosed || w.timestampCreated).toLocaleString()}</td>
           <td>${startTime} - ${endTime}</td>
-          <td><strong>${w.predictedDirection}</strong> (${w.predictedProbability}%)</td>
+          <td><strong>${w.predictedDirection}</strong> ${w.predictedDirection==='MISSED'?'':'(' + w.predictedProbability + '%)'}</td>
           <td><strong>${w.actualDirection || 'PENDING'}</strong></td>
           <td>$${w.entryPrice ? w.entryPrice.toFixed(2) : '-'}</td>
           <td>$${w.exitPrice ? w.exitPrice.toFixed(2) : '-'}</td>
@@ -1278,6 +1491,8 @@ class App {
   clearHistory(){
     if (confirm('Are you sure you want to clear all history? This cannot be undone.')){
       this.storage.clear();
+      this.clearRuntimeState();
+      this.clearFinalCall();
       this.renderHistory();
     }
   }
