@@ -13,6 +13,10 @@
         }
 
 ```
+    html {
+        background: #000000;
+    }
+
     body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
         background: #000000;
@@ -68,6 +72,7 @@
         max-width: 1400px;
         margin: 0 auto;
         padding: 2rem;
+        background: #000000;
     }
 
     @media (max-width: 768px) {
@@ -671,11 +676,11 @@
         <button class="tab" onclick="switchTab('positions')">My Positions</button>
     </div>
 
-    <div id="markets-view">
+    <div id="markets-view" style="background: #000000;">
         <div class="markets-grid" id="markets-grid"></div>
     </div>
 
-    <div id="positions-view" style="display: none;">
+    <div id="positions-view" style="display: none; background: #000000;">
         <div class="positions-list" id="positions-list"></div>
     </div>
 </div>
